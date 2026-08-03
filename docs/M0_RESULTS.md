@@ -308,6 +308,45 @@ sherpa-onnx     : का ता क्या है मे े
 correct decode  : अपका पता क्या है, मुझे भेज दिजिए।
 ```
 
+## Script policy: Devanagari requirement dropped (2026-08-04)
+
+`base` frequently emits Hindi in **Urdu script** (`آپ کا پتہ کیا ہے ?`) or in
+Latin romanisation, rather than Devanagari. `small` emits clean Devanagari
+essentially always — 5/5 on a spot check where `base` was 0/5.
+
+Two fixes were tried on `base` and neither works:
+
+- **Devanagari initial prompt** (`params.initial_prompt`): unreliable. It
+  corrected `hi_003`, but turned `hi_004` into garbage (`drop pen 2 । । ।`)
+  and pushed `mix_007` *further* into Urdu.
+- **`suppress_regex` over the Arabic block**: returned empty output — the
+  `\uXXXX` escape form isn't what whisper.cpp's matcher accepts.
+
+The Urdu is not a tunable setting; it is the same weakness as `base`'s ~102%
+Hindi WER and its habit of emitting English translations. Hindi and Urdu are
+the same spoken language, so a model that doesn't really know Hindi drifts to
+whichever script it is more confident in.
+
+**The requirement was subsequently dropped** — any script is acceptable. That
+does not change the model decision. Scoring each model against whichever
+script it actually produces:
+
+| model | best-matching script | hi WER | hi CER | mix WER |
+|---|---|---|---|---|
+| `base` | Latin | **90.91%** | 51.38% | 84.75% |
+| `small` | Devanagari | **54.55%** | **20.66%** | 82.06% |
+
+Dropping the constraint helps `base` materially at character level (hi CER
+112% → 51%, i.e. it was being penalised for romanising rather than for
+mishearing) but leaves word-level accuracy unusable. `small` remains ~36
+points better.
+
+Note the mirror artifact: `small` scored against Latin refs reads 103.90% —
+meaningless, since it is being penalised for correctly producing Devanagari.
+This is the same script-mismatch trap that produced the original false
+conclusion about Hindi being hopeless, so **each model must be scored against
+its own output script**, never a single fixed one.
+
 ## `base` vs `small`, re-decided on valid data
 
 Re-measured with whisper.cpp (correct byte-level detokenization, same decoder

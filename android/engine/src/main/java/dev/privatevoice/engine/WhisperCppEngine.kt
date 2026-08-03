@@ -148,7 +148,7 @@ class WhisperCppEngine(
          * can truncate before a timestamp token, leaving whisper.cpp's seek
          * position stuck and re-decoding the same window forever.
          */
-        private const val DECODE_TIMEOUT_MS = 30_000
+        private const val DECODE_TIMEOUT_MS = 180_000
 
         /** ggml/BLAS/NEON feature flags the native build actually enabled. */
         fun systemInfo(): String = WhisperLib.getSystemInfo()
