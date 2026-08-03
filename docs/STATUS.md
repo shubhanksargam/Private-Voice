@@ -5,24 +5,27 @@ writeup. This file is the short version plus what's next.
 
 ## One-line state
 
-**M0 ran to completion with a real, load-bearing result: `base-int8` passes
-the latency gate (1030ms @ 4 threads) but fails the accuracy bar for Hindi and
-Hinglish badly (80-110% WER). `small` is more accurate-looking but 2x over the
-latency budget regardless of thread count.** Neither model, as tested,
-delivers "beat Google on Hindi/Hinglish." This is a real finding, not a bug to
-fix — a decision on how to respond needs a human call.
+**M0 is done, and a direction has been chosen: ship English-only for v1.**
+`base-int8` at 4 threads (1030ms median, ~20% WER on Indian English) is the
+production engine. Hindi/Hinglish support is deferred — stock Whisper fails
+badly on both regardless of model size (see `docs/M0_RESULTS.md`'s decision
+section) — rather than blocking the app on a fine-tune that doesn't exist
+yet. M1 (engine layer) is next.
 
-## Do this next — pick a direction
+## Do this next — build M1
 
-M0's decision tree (see `docs/M0_RESULTS.md`'s "What this changes going
-forward") lays out four live options: fine-tune a Hindi-specific model
-(most promising given the size of the gap), try to speed up `small` enough to
-pass the budget (mel-truncation or NNAPI/GPU offload), dual-model routing by
-detected language, or ship `base` as English-only with Hindi flagged as beta.
+Per the original plan (`C:\Users\sarga\.claude\plans\expressive-beaming-backus.md`),
+M1 is the engine layer: wire `AsrEngine`/`SherpaWhisperEngine` into a
+production path with `AudioSource` (AudioRecord, 16kHz mono) → `VadGate`
+(Silero VAD, endpointing only) → transcribe, running off the main thread,
+model held warm across calls. `BenchmarkActivity`/`BenchmarkRunner` were a
+throwaway measurement harness — this is the real thing they were built to
+justify.
 
-**None of these are implemented.** Nothing above the benchmark harness
-(IME, RecognitionService, text UX — M1-M4 in the original plan) should be
-built until this is resolved, per the plan's original gating logic.
+Keep the `AsrEngine` interface and per-subtype language hook from the
+original design even though only English ships now — that's what makes
+adding Hindi back in later (once a fine-tune exists) a model swap, not a
+rearchitecture.
 
 ## What's actually been verified (not just written)
 

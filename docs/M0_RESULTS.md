@@ -146,6 +146,22 @@ what the `small` scoring actually showed:
 None of these are implemented yet — this file records the measurement, not a
 decision. That decision needs a human call given the tradeoffs above.
 
+## Decision (2026-08-04): ship English-only for v1
+
+Option 4 chosen. `base-int8` at 4 threads is the production engine going
+forward: 1030ms median, comfortably within budget, ~20% WER on Indian
+English (workable, not Google-beating, but usable). Hindi/Hinglish support
+is deferred — not built into M1-M4 as a shipping feature — rather than
+blocking the rest of the app on a fine-tune that hasn't happened yet.
+
+**What this means for M1 onward:** the IME/RecognitionService/text-UX
+milestones proceed with English as the only supported language for this
+release. The `AsrEngine` interface and per-subtype language hook from the
+original plan stay as designed — they're what make adding Hindi back in
+(via a fine-tune, once one exists) a model swap rather than a rearchitecture.
+Nothing needs to be built differently now to keep that door open later; it
+just isn't the thing being built next.
+
 ## Two infrastructure bugs worth knowing about if this gets rerun
 
 1. **Screen-off silently froze the benchmark twice**, once for ~26 minutes and
