@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _adb import ADB
+
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "eval" / "prompts.jsonl"
 OUT = ROOT / "eval" / "audio"
@@ -72,12 +74,10 @@ def convert(ffmpeg: str, src: Path, dest: Path) -> bool:
 
 
 def push() -> None:
-    if not shutil.which("adb"):
-        raise SystemExit("adb not on PATH — install Android platform-tools first.")
-    subprocess.run(["adb", "shell", "mkdir", "-p", DEVICE_EVAL], capture_output=True)
+    subprocess.run([ADB, "shell", "mkdir", "-p", DEVICE_EVAL], capture_output=True)
     files = sorted(OUT.glob("*.wav"))
     for f in files:
-        r = subprocess.run(["adb", "push", str(f), f"{DEVICE_EVAL}/{f.name}"],
+        r = subprocess.run([ADB, "push", str(f), f"{DEVICE_EVAL}/{f.name}"],
                            capture_output=True, text=True)
         if r.returncode != 0:
             print(f"  push {f.name} FAILED: {r.stderr.strip()}")

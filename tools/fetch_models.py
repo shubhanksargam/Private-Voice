@@ -23,6 +23,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from _adb import ADB
+
 APP_ID = "dev.privatevoice.app"
 DEVICE_BASE = f"/sdcard/Android/data/{APP_ID}/files"
 
@@ -83,13 +85,16 @@ def download(repo: str, remote: str, dest: Path) -> bool:
 
 
 def adb(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["adb", *args], capture_output=True, text=True)
+    return subprocess.run([ADB, *args], capture_output=True, text=True)
 
 
 def ensure_device() -> None:
-    probe = adb("devices")
+    try:
+        probe = adb("devices")
+    except FileNotFoundError:
+        raise SystemExit(f"adb not found at {ADB!r}. See docs/SETUP.md.") from None
     if probe.returncode != 0:
-        raise SystemExit("adb not found on PATH. Install Android platform-tools.")
+        raise SystemExit(f"adb devices failed:\n{probe.stderr}")
     lines = [l for l in probe.stdout.splitlines()[1:] if l.strip()]
     attached = [l for l in lines if l.endswith("device")]
     if not attached:

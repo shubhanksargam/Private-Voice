@@ -2,44 +2,65 @@
 
 ## Toolchain
 
-| Need | Status on this machine | Notes |
+Fully resolved and build-verified — `:app:assembleDebug` succeeds end to end.
+
+| Need | Status | Notes |
 |---|---|---|
-| JDK 17 or 21 | ⚠️ **Java 25 installed** | AGP does not support 25. Install 17 or 21. |
-| Android SDK | ❌ missing | Needs platform 35 + build-tools |
-| adb (platform-tools) | ❌ missing | Required to push models and run the benchmark |
-| Gradle | ❌ missing | Only needed once, to generate the wrapper |
+| JDK | ✅ Android Studio JBR 25 | Used explicitly via `JAVA_HOME`, not system Java. AGP 9.1.1 needs JDK 17+; earlier guidance in this file said 25 was incompatible — that was wrong for 2026's AGP. |
+| Android Studio | ✅ 2026.1.3.7 | `C:\Program Files\Android\Android Studio` |
+| Android SDK | ✅ provisioned headlessly | `%LOCALAPPDATA%\Android\Sdk` — platform 36, build-tools 36.0.0, platform-tools, via `sdkmanager` rather than Studio's GUI wizard |
+| adb | ✅ | `tools/_adb.py` resolves the full path so nothing depends on PATH being refreshed in a given shell |
+| Gradle | ✅ wrapper generated, 9.6.1 | `android/gradlew.bat`; AGP 9.1.1 needs 9.3.1+ |
+| Kotlin | ✅ built-in (AGP 9+) | No separate `kotlin-android` plugin — see below |
 | Python 3.10+ | ✅ 3.10.10 | Used by everything in `tools/` |
-| git | ❌ missing | Optional, but you want history for this |
+| git | ✅ 2.55.0 | Repo initialised at `D:\pj` |
+| ffmpeg | ❌ missing | Only needed for `tools/prepare_audio.py`: `winget install Gyan.FFmpeg` |
 
-### Recommended: Android Studio
+Everything above was provisioned non-interactively — no GUI setup wizard, since
+this tool's shell sandbox runs with stdin attached to the null device and
+interactive prompts (including `sdkmanager --licenses`) can't receive piped input
+there. `sdkmanager` itself was fetched as `commandlinetools-win-*_latest.zip`
+under `cmdline-tools/latest/`, and SDK licenses were accepted by writing the
+well-known public license-hash files directly into `Sdk/licenses/` (the same
+technique `android-actions/setup-android` and most CI pipelines use) rather than
+through the interactive prompt.
 
-Installing Android Studio resolves JDK, SDK, adb and the Gradle wrapper in one step —
-it bundles a JetBrains Runtime 21 and can generate `gradlew` for you.
+If you open Android Studio, point it at the same SDK location (Settings →
+Languages & Frameworks → Android SDK) rather than letting it provision a second
+copy.
 
-1. Install Android Studio.
-2. Open `D:\pj\android` — it will offer to create the Gradle wrapper and sync.
-3. SDK Manager → install **Android 15 (API 35)** platform + build-tools.
-4. Add `platform-tools` to `PATH` so `adb` works from a terminal.
+### Why AGP 9.1.1 / Gradle 9.6.1 / API 36 / built-in Kotlin, not 8.x / API 35
 
-### Alternative: command line only
+The project was originally scaffolded against AGP 8.7.3 and a separate
+`kotlin-android` plugin — constraints that were current at some point but are
+stale for 2026. Two real build failures came from this and both are fixed now:
 
-```powershell
-# JDK 21
-winget install EclipseAdoptium.Temurin.21.JDK
+1. **AGP 9.0+ has built-in Kotlin support**, and applying the old
+   `org.jetbrains.kotlin.android` plugin alongside it throws `Cannot add
+   extension with name 'kotlin'`. Fixed by removing the plugin entirely — Kotlin
+   compiles via AGP directly. This isn't a workaround; [Google's own migration
+   guide](https://developer.android.com/build/migrate-to-built-in-kotlin) says
+   built-in Kotlin becomes *mandatory* in AGP 10.0.
+2. **Built-in Kotlin doesn't read extra sources from `java.srcDirs`.** The
+   vendored sherpa-onnx sources under `engine/src/main/vendor/` need the new
+   `kotlin.directories` source-set property instead (see
+   `engine/build.gradle.kts`) — `java.srcDirs` silently stopped feeding the
+   Kotlin compile task under the new model, which surfaced as "Unresolved
+   reference" on every sherpa-onnx import even though the files were present.
 
-# Android command-line tools, then:
-sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+AGP 9.1.1 (April 2026) is one release behind the July 2026 bleeding edge, needs
+Gradle 9.3.1+, and supports compileSdk up to 37. `compileSdk`/`targetSdk` are set
+to 36 (Android 16, stable since ~mid-2026) rather than jumping to 37 (Android 17,
+only ~2 months old as of this writing).
 
-# Point Gradle at the right JDK if 25 remains your default:
-#   android/gradle.properties -> org.gradle.java.home=C:/path/to/jdk-21
-```
+### A third bug, unrelated to any of the above
 
-The Gradle wrapper JAR is not in this repo (it is a binary). Generate it once:
-
-```powershell
-cd D:\pj\android
-gradle wrapper --gradle-version 8.11.1
-```
+`BenchmarkActivity.kt`'s KDoc comment originally described a path as
+`files/eval/*.wav`. Kotlin block comments **nest** (unlike C), so the `/*` inside
+`eval/*.wav` opened a second comment level that the file's one closing `*/` never
+balanced — the whole rest of the file silently became a comment, reported as
+"Unclosed comment" at EOF. Reworded to avoid the accidental `/*`; worth knowing
+about since it's easy to reintroduce in any doc comment that mentions a glob path.
 
 ## Project setup
 

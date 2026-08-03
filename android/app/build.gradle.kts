@@ -2,17 +2,18 @@ import com.android.build.api.artifact.SingleArtifact
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // Kotlin compiled via AGP's built-in support (AGP 9+) — no separate
+    // kotlin-android plugin. See docs/SETUP.md.
 }
 
 android {
     namespace = "dev.privatevoice.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.privatevoice.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0-m0"
         ndk {
@@ -30,10 +31,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
+        // Built-in Kotlin's jvmTarget defaults to this targetCompatibility, so
+        // no separate kotlin { compilerOptions { ... } } block is needed.
     }
 
     buildFeatures {
@@ -103,8 +102,12 @@ androidComponents {
             description = "Fails the build if the merged manifest requests network access."
             mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
         }
-        // Bind to assemble so a plain build cannot skip it.
-        tasks.named("assemble${variant.name.replaceFirstChar { it.uppercase() }}") {
+        // Bind to assemble so a plain build cannot skip it. tasks.named() would
+        // require assembleDebug to already be registered at this point in
+        // configuration, which it isn't yet — matching+configureEach reacts as
+        // AGP adds the task instead of requiring it to exist up front.
+        val assembleTaskName = "assemble${variant.name.replaceFirstChar { it.uppercase() }}"
+        tasks.matching { it.name == assembleTaskName }.configureEach {
             dependsOn(check)
         }
     }

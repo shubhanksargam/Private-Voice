@@ -1,11 +1,12 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    // Kotlin compiled via AGP's built-in support (AGP 9+) — no separate
+    // kotlin-android plugin. See docs/SETUP.md.
 }
 
 android {
     namespace = "dev.privatevoice.engine"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
@@ -19,17 +20,18 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
+        // Built-in Kotlin's jvmTarget defaults to this targetCompatibility, so
+        // no separate kotlin { compilerOptions { ... } } block is needed.
     }
 
     sourceSets {
         getByName("main") {
-            // Populated by tools/setup_sherpa.py — see docs/SETUP.md
-            jniLibs.srcDirs("src/main/jniLibs")
-            java.srcDirs("src/main/java", "src/main/vendor")
+            // Populated by tools/setup_sherpa.py — see docs/SETUP.md.
+            // Under AGP's built-in Kotlin support, extra Kotlin sources must be
+            // added via the `kotlin` source-set property, not `java.srcDirs` —
+            // the latter no longer feeds the Kotlin compile task.
+            jniLibs.directories += "src/main/jniLibs"
+            kotlin.directories += "src/main/vendor"
         }
     }
 }

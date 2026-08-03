@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from _adb import ADB
 
 APP_ID = "dev.privatevoice.app"
 ACTIVITY = f"{APP_ID}/.BenchmarkActivity"
@@ -28,11 +31,15 @@ ROOT = Path(__file__).resolve().parent.parent
 LOCAL_JSON = ROOT / "eval" / "benchmark.json"
 GRADLEW = ROOT / "android" / ("gradlew.bat" if sys.platform == "win32" else "gradlew")
 
+# The Android Studio JBR is used rather than relying on system JAVA_HOME, which
+# may point at an unrelated JDK (or none). See docs/SETUP.md.
+STUDIO_JBR = Path(r"C:\Program Files\Android\Android Studio\jbr")
+
 TARGET_MS = 2500
 
 
 def adb(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    r = subprocess.run(["adb", *args], capture_output=True, text=True)
+    r = subprocess.run([ADB, *args], capture_output=True, text=True)
     if check and r.returncode != 0:
         raise SystemExit(f"adb {' '.join(args)} failed:\n{r.stderr}")
     return r
@@ -46,7 +53,10 @@ def build_and_install() -> None:
             "or run 'gradle wrapper' there if you have Gradle installed."
         )
     print("Building + installing ...")
-    r = subprocess.run([str(GRADLEW), ":app:installDebug"], cwd=ROOT / "android")
+    env = dict(os.environ)
+    if STUDIO_JBR.exists():
+        env["JAVA_HOME"] = str(STUDIO_JBR)
+    r = subprocess.run([str(GRADLEW), ":app:installDebug"], cwd=ROOT / "android", env=env)
     if r.returncode != 0:
         raise SystemExit("Build failed.")
 

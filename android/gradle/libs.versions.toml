@@ -1,6 +1,5 @@
 [versions]
-agp = "8.7.3"
-kotlin = "2.0.21"
+agp = "9.1.1"
 coreKtx = "1.15.0"
 appcompat = "1.7.0"
 material = "1.12.0"
@@ -19,4 +18,6 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+# No org.jetbrains.kotlin.android entry: AGP 9's built-in Kotlin support replaces
+# it, and applying the old plugin alongside it fails with "Cannot add extension
+# with name 'kotlin'". See docs/SETUP.md.

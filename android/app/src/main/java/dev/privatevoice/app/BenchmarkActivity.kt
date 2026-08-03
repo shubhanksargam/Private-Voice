@@ -15,8 +15,8 @@ import java.io.File
  * M0 harness. Deliberately ugly — it exists to produce numbers, not to be a UI.
  *
  * Expects, under the app's external files dir (adb-pushable, no permission needed):
- *   files/models/<model-name>/{*-encoder*.onnx, *-decoder*.onnx, *-tokens.txt}
- *   files/eval/*.wav        16kHz mono 16-bit
+ *   files/models/<model-name>/{encoder, decoder, tokens}.onnx-or-txt
+ *   files/eval/ - WAV files, 16kHz mono 16-bit
  *
  * Populate both with: python tools/fetch_models.py --push
  * Drive headlessly and tabulate with: python tools/bench_device.py
