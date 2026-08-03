@@ -28,3 +28,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Model transcripts of your recordings (same privacy class as eval/audio/)
+eval/fw_*.jsonl
+eval/independent_check.json

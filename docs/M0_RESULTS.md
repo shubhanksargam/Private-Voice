@@ -146,7 +146,7 @@ what the `small` scoring actually showed:
 None of these are implemented yet — this file records the measurement, not a
 decision. That decision needs a human call given the tradeoffs above.
 
-## Decision (2026-08-04): ship English-only for v1
+## Decision (2026-08-04): ship English-only for v1 — ⚠️ SUPERSEDED, see below
 
 Option 4 chosen. `base-int8` at 4 threads is the production engine going
 forward: 1030ms median, comfortably within budget, ~20% WER on Indian
@@ -154,13 +154,88 @@ English (workable, not Google-beating, but usable). Hindi/Hinglish support
 is deferred — not built into M1-M4 as a shipping feature — rather than
 blocking the rest of the app on a fine-tune that hasn't happened yet.
 
-**What this means for M1 onward:** the IME/RecognitionService/text-UX
-milestones proceed with English as the only supported language for this
-release. The `AsrEngine` interface and per-subtype language hook from the
-original plan stay as designed — they're what make adding Hindi back in
-(via a fine-tune, once one exists) a model swap rather than a rearchitecture.
-Nothing needs to be built differently now to keep that door open later; it
-just isn't the thing being built next.
+**This decision rested on invalid Hindi accuracy data.** See the next section.
+
+---
+
+# ⚠️ CORRECTION (2026-08-04, same day): the Hindi numbers above are a
+# measurement artifact, not model accuracy
+
+**All Hindi/Hinglish WER figures in this document are wrong.** They measured
+a text-decoding bug in sherpa-onnx, not Whisper's ability to transcribe Hindi.
+
+## The bug
+
+sherpa-onnx converts each Whisper output token to a string **individually**,
+then concatenates the strings. Whisper uses byte-level BPE, so a token is a
+sequence of *bytes*, not necessarily a complete character. Devanagari
+codepoints are 3 bytes in UTF-8 and Whisper's BPE routinely splits them
+across token boundaries. Any token holding a partial UTF-8 sequence isn't
+valid text on its own, so it decodes to an **empty string and is silently
+dropped**.
+
+Direct evidence — the token stream for `hi_002`:
+
+```
+[' म', 'ै', 'ं', ' ', '', 'र', '्', 'स', '', '', 'न', ' ', '', 'ि', 'ल', ...]
+                        ^^                ^^  ^^        ^^
+```
+
+Those empty strings are exactly where consonants should be. `result.text` is
+literally these concatenated, which is why the output reads as orphaned vowel
+signs with the consonants missing.
+
+Measured across the Devanagari corpus, sherpa-onnx output retained only
+**~40% of expected character length** with **1.6x the normal combining-mark
+density**. ASCII is 1 byte/char and never splits, which is why English was
+unaffected — and why `mix_011`, the one utterance containing English words
+("half day leave"), came through at 103% length while its Devanagari
+neighbours were mangled.
+
+Not Android-specific: reproduced byte-for-byte on desktop with sherpa-onnx's
+Python bindings and the same ONNX weights. `tokens.txt` itself is fine
+(base64-encoded, preserves arbitrary bytes) — the loss happens at
+detokenization. Still present in sherpa-onnx 1.13.x.
+
+## The real numbers
+
+Same `whisper-small` weights, same audio, correct byte-level detokenization
+(via faster-whisper / CTranslate2):
+
+| split | sherpa-onnx WER | **correct WER** | sherpa-onnx CER | **correct CER** |
+|---|---|---|---|---|
+| en | 14.17% | **12.50%** | 4.33% | **4.92%** |
+| hi | 90.91% | **50.65%** | 62.36% | **21.03%** |
+| mix | 89.69% | **66.37%** | 72.72% | **38.10%** |
+| ALL | 68.33% | **48.10%** | 49.41% | **24.77%** |
+
+Hindi character error rate improves ~3x (62% → 21%). Hinglish WER lands at
+66%, i.e. **inside the published 27-70% code-switch range** — ordinary
+for the task, not evidence of a broken model.
+
+Sample of what the same model actually produces when decoded correctly:
+
+```
+reference       : आपका पता क्या है, मुझे भेज दीजिए।
+sherpa-onnx     : का ता क्या है मे े
+correct decode  : अपका पता क्या है, मुझे भेज दिजिए।
+```
+
+## What this changes
+
+- **`base` vs `small` should be re-decided.** `base` outputs romanised Latin
+  for Hindi, which dodged the bug and made it look artificially competitive;
+  `small` outputs Devanagari and took the full hit. Their real ranking is
+  unknown until both are re-measured with correct decoding.
+- **The English-only decision should be revisited** — it was justified by
+  "Hindi is unusable," which is not what the data actually shows.
+- **sherpa-onnx cannot ship as the runtime for Hindi** in its current state,
+  regardless. The `AsrEngine` interface was designed with `WhisperCppEngine`
+  as "backend B, if needed" — this is that case. whisper.cpp accumulates
+  bytes across tokens and handles byte-level BPE correctly.
+- **The latency numbers remain valid.** The bug affects text output only, not
+  compute. `base` passing and `small` failing the 2.5s budget still stands,
+  and is still the binding constraint on which model can ship.
 
 ## Two infrastructure bugs worth knowing about if this gets rerun
 

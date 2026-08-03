@@ -5,27 +5,41 @@ writeup. This file is the short version plus what's next.
 
 ## One-line state
 
-**M0 is done, and a direction has been chosen: ship English-only for v1.**
-`base-int8` at 4 threads (1030ms median, ~20% WER on Indian English) is the
-production engine. Hindi/Hinglish support is deferred — stock Whisper fails
-badly on both regardless of model size (see `docs/M0_RESULTS.md`'s decision
-section) — rather than blocking the app on a fine-tune that doesn't exist
-yet. M1 (engine layer) is next.
+**M0's latency results stand; its Hindi accuracy results were invalid and have
+been corrected.** sherpa-onnx has a byte-level-BPE detokenization bug that
+silently drops partial-UTF-8 tokens, destroying ~60% of Devanagari characters
+while leaving ASCII untouched. Re-measured with correct decoding, Hindi WER is
+**50.65%** (not 90.91%) and Hindi CER is **21.03%** (not 62.36%). Full writeup
+in `docs/M0_RESULTS.md`'s CORRECTION section.
 
-## Do this next — build M1
+The "ship English-only" decision was made on the bad numbers and is **open
+again** — it was justified by "Hindi is unusable," which isn't what the data
+shows.
 
-Per the original plan (`C:\Users\sarga\.claude\plans\expressive-beaming-backus.md`),
-M1 is the engine layer: wire `AsrEngine`/`SherpaWhisperEngine` into a
-production path with `AudioSource` (AudioRecord, 16kHz mono) → `VadGate`
-(Silero VAD, endpointing only) → transcribe, running off the main thread,
-model held warm across calls. `BenchmarkActivity`/`BenchmarkRunner` were a
-throwaway measurement harness — this is the real thing they were built to
-justify.
+## Do this next — swap the ASR backend, then re-run M0
 
-Keep the `AsrEngine` interface and per-subtype language hook from the
-original design even though only English ships now — that's what makes
-adding Hindi back in later (once a fine-tune exists) a model swap, not a
-rearchitecture.
+sherpa-onnx can't ship as the runtime for Hindi in its current state. The
+original plan anticipated this: `AsrEngine` names `WhisperCppEngine` as
+"backend B, if needed," and this is that case — whisper.cpp accumulates bytes
+across tokens and handles byte-level BPE correctly.
+
+1. **Add a whisper.cpp backend** behind the existing `AsrEngine` interface
+   (GGML/GGUF weights instead of ONNX; JNI via the official `whisper.android`
+   bindings). Nothing above the interface should need to change.
+2. **Re-run the M0 sweep** on it — `tiny`/`base`/`small`, int8-equivalent
+   quantization, 2/4 threads. The tooling and the 48-utterance corpus are all
+   in place and the harness now writes incrementally, so this is cheap to
+   repeat.
+3. **Re-decide `base` vs `small`.** Their previous ranking is untrustworthy:
+   `base` emitted romanised Latin for Hindi (dodging the bug), `small` emitted
+   Devanagari (taking the full hit). Latency still says `base` fits and
+   `small` doesn't — that part is unaffected and remains the binding
+   constraint.
+4. **Then** revisit English-only vs. shipping Hindi, on real numbers.
+
+M1 (the production engine layer: `AudioSource` → `VadGate` → transcribe) is
+still the next *feature* milestone, but doing it against a backend that's
+about to be replaced would be wasted work — do the swap first.
 
 ## What's actually been verified (not just written)
 
