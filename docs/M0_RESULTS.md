@@ -222,6 +222,22 @@ was drawn from this data before the cause was found (the `temperature_inc`
 hypothesis above), which is the concrete cost of benchmarking a saturated
 device.
 
+Two observations confirm this was device state and not a broken build:
+
+1. **The degradation was not monotonic.** Mid-way through a run where nearly
+   every utterance timed out, `mix_009` completed normally at **1643ms** —
+   ordinary `base` speed. A genuinely broken build does not intermittently
+   produce correct results at full speed; a system oscillating under memory
+   and thermal pressure does.
+2. **The device recovered fully once load stopped.** Big-core
+   `scaling_max_freq` returned to 2400000 from the 1728000 cap, free RAM went
+   from ~300MB to 1.27GB, and swap was released — no reboot required.
+
+Also worth knowing for future runs: Android **restarted the benchmark activity
+on its own** several minutes after a `force-stop`, resuming the sweep
+unattended. Confirm the process is actually gone (`pidof`) rather than assuming
+a force-stop settled it, or a "cooling" device may quietly still be under load.
+
 **Any future sweep must start from a cool, rebooted phone**, and long sweeps
 should be split with cooldown gaps. `base`'s 1447ms and `small`'s ~4s were both
 captured early while the device was healthy and are the numbers to trust; the
