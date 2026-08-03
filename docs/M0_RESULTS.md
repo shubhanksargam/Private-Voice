@@ -221,12 +221,46 @@ sherpa-onnx     : का ता क्या है मे े
 correct decode  : अपका पता क्या है, मुझे भेज दिजिए।
 ```
 
-## What this changes
+## `base` vs `small`, re-decided on valid data
 
-- **`base` vs `small` should be re-decided.** `base` outputs romanised Latin
-  for Hindi, which dodged the bug and made it look artificially competitive;
-  `small` outputs Devanagari and took the full hit. Their real ranking is
-  unknown until both are re-measured with correct decoding.
+Re-measured with whisper.cpp (correct byte-level detokenization, same decoder
+that will run on-device), q5_1 quantization, full 48-utterance corpus:
+
+| model | size | en WER | hi WER | hi CER | mix WER | mix CER |
+|---|---|---|---|---|---|---|
+| `base-q5_1` | 57MB | 18.33% | **102.60%** | 112.18% | 103.59% | 106.25% |
+| `small-q5_1` | 181MB | 13.33% | **54.55%** | **20.66%** | 82.06% | 55.17% |
+
+**`base` is genuinely unusable for Hindi and this is not a decoding
+artifact.** Given `-l hi` it emits fluent *English translations* rather than
+Hindi transcriptions ("I have submitted the form, but the confirmation has
+not come."), a known failure mode where small multilingual Whisper drifts to
+English on languages it handles weakly. Correct decoding did not change this;
+`base`'s Hindi is simply not there.
+
+**`small` is the minimum viable size for Hindi.** hi CER of 20.66% is in
+usable-with-refinement territory; `base`'s 112% is not.
+
+Secondary benefit of GGML over the ONNX export: far smaller on disk for the
+same weights, because GGML quantizes the token-embedding matrix too, which
+the sherpa-onnx export left in fp32 (`base` 153MB → 57MB, `small` 358MB →
+181MB).
+
+### The open question this creates
+
+`small` **failed the latency gate under sherpa-onnx/ONNX Runtime** (4876ms vs
+a 2500ms budget). Whether whisper.cpp/GGML — generally faster than ONNX
+Runtime for Whisper on ARM CPU — can bring `small` under budget on the A35 is
+now *the* deciding measurement for this project. That is what the Android
+whisper.cpp backend exists to answer.
+
+For reference, faster-whisper (CTranslate2, int8, beam=5) on the same corpus
+scored hi 50.65% / mix 66.37% — somewhat better than whisper.cpp q5_1's
+54.55% / 82.06%, particularly on Hinglish. Worth revisiting quantization
+(q8_0) and decoding strategy (beam search) as accuracy levers once latency
+headroom on-device is known.
+
+## What this changes
 - **The English-only decision should be revisited** — it was justified by
   "Hindi is unusable," which is not what the data actually shows.
 - **sherpa-onnx cannot ship as the runtime for Hindi** in its current state,

@@ -32,3 +32,7 @@ venv/
 # Model transcripts of your recordings (same privacy class as eval/audio/)
 eval/fw_*.jsonl
 eval/independent_check.json
+
+# Desktop whisper.cpp scratch (binaries + ggml weights)
+.tmp_whispercpp/
+eval/wcpp_*.jsonl
