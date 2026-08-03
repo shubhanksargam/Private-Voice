@@ -28,10 +28,12 @@ internal object WhisperLib {
      * segments joined.
      *
      * @param language BCP-47-ish tag ("en", "hi"), or null to auto-detect.
-     * @param maxTokens per-segment token ceiling, or 0 for whisper.cpp's
-     *   default (no extra limit). A bound here is what stops a degenerate
-     *   decode from running unbounded.
-     * @return decoded text, or null if the native decode failed.
+     * @param timeoutMs wall-clock ceiling for the decode, or 0 for unbounded.
+     *   On timeout whatever was decoded so far is returned rather than an
+     *   error. This is what stops a degenerate decode from running forever;
+     *   a per-segment token cap was tried first and caused a worse failure
+     *   (see jni_whisper.c).
+     * @return decoded text, or null if the native decode failed outright.
      */
     external fun fullTranscribeToString(
         contextPtr: Long,
@@ -39,7 +41,7 @@ internal object WhisperLib {
         audioData: FloatArray,
         language: String?,
         translate: Boolean,
-        maxTokens: Int,
+        timeoutMs: Int,
     ): String?
 
     external fun getSystemInfo(): String

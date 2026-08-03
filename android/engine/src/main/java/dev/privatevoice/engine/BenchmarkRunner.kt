@@ -191,10 +191,33 @@ class BenchmarkRunner(
                 val lang = languageOverride ?: languageForFile(wav.name)
                 val timings = mutableListOf<Long>()
                 var text = ""
-                repeat(repeats) {
-                    val result = engine.transcribe(audio.samples, audio.sampleRate, lang)
-                    timings += result.decodeMillis
-                    text = result.text
+                // A single utterance can fail — most usefully, whisper.cpp can
+                // go pathological and blow past the decode timeout on input it
+                // normally handles in seconds. Record it and keep going: one
+                // bad utterance is a data point, and letting it propagate loses
+                // the entire sweep (which it did, three times over, before this
+                // was here).
+                val failure = try {
+                    repeat(repeats) {
+                        val result = engine.transcribe(audio.samples, audio.sampleRate, lang)
+                        timings += result.decodeMillis
+                        text = result.text
+                    }
+                    null
+                } catch (t: Throwable) {
+                    Log.w(TAG, "utterance ${wav.name} failed on ${c.id}", t)
+                    t.message ?: t::class.java.simpleName
+                }
+
+                if (failure != null) {
+                    progress.onLine("   ${wav.name}  FAILED: $failure")
+                    perUtterance.put(JSONObject().apply {
+                        put("file", wav.name)
+                        put("language", lang)
+                        put("durationSec", audio.durationSeconds)
+                        put("error", failure)
+                    })
+                    continue
                 }
                 allTimings += timings
 
@@ -214,13 +237,21 @@ class BenchmarkRunner(
                 })
             }
 
+            val failures = (0 until perUtterance.length())
+                .count { perUtterance.optJSONObject(it)?.has("error") == true }
+
             val overall = allTimings.median()
             val verdict = when {
                 allTimings.isEmpty() -> "no-data"
+                // A model that intermittently fails to decode at all can't ship
+                // in a keyboard however good its median looks, so this outranks
+                // the latency check rather than being a footnote to it.
+                failures > 0 -> "unreliable"
                 overall <= TARGET_MILLIS -> "PASS"
                 else -> "too-slow"
             }
-            progress.onLine("   => median ${overall}ms  [$verdict]")
+            val failNote = if (failures > 0) "  ($failures/${wavs.size} failed)" else ""
+            progress.onLine("   => median ${overall}ms  [$verdict]$failNote")
 
             JSONObject().apply {
                 put("id", c.id)
@@ -230,6 +261,7 @@ class BenchmarkRunner(
                 put("loadMillis", engine.loadMillis)
                 put("peakPssMB", Debug.getPss() / 1024)
                 put("medianMillis", overall)
+                put("failedUtterances", failures)
                 put("verdict", verdict)
                 put("utterances", perUtterance)
             }

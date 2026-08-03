@@ -18,9 +18,11 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysinfo.h>
+#include <time.h>
 #include "whisper.h"
 #include "ggml.h"
 
@@ -28,6 +30,28 @@
 #define TAG "WhisperCppJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
+
+static double now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1.0e6;
+}
+
+struct deadline { double expires_at_ms; bool fired; };
+
+// whisper.cpp polls this during decoding; returning true aborts the run.
+static bool abort_on_deadline(void *user_data) {
+    struct deadline *d = (struct deadline *) user_data;
+    if (d->expires_at_ms <= 0.0) return false;   // unbounded
+    if (now_ms() >= d->expires_at_ms) {
+        if (!d->fired) {
+            d->fired = true;
+            LOGW("decode exceeded budget, aborting");
+        }
+        return true;
+    }
+    return false;
+}
 
 JNIEXPORT jlong JNICALL
 Java_dev_privatevoice_engine_WhisperLib_initContext(
@@ -59,7 +83,7 @@ JNIEXPORT jstring JNICALL
 Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
         jfloatArray audio_data, jstring language_str, jboolean translate,
-        jint max_tokens) {
+        jint timeout_ms) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     if (context == NULL) return NULL;
@@ -80,12 +104,25 @@ Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
     // poison the next.
     params.no_context = true;
     params.single_segment = false;
-    // Bounds a degenerate decode. Fed pure digital silence, greedy decoding
-    // will hallucinate and loop, emitting tokens until it hits an internal
-    // limit — long enough to look like a hang. Real mic input has a noise
-    // floor and doesn't trigger it, but a keyboard must not be one silent
-    // buffer away from locking up. 0 means whisper.cpp's default.
-    params.max_tokens = max_tokens;
+
+    // Bound the decode by wall-clock, not by token count.
+    //
+    // params.max_tokens was tried first and is actively harmful here: it caps
+    // tokens *per segment*, and if the cap lands before whisper.cpp emits a
+    // timestamp token, the decoder's seek position never advances and it
+    // re-decodes the same window forever. That converted an occasional slow
+    // utterance into a hard hang with four threads pegged indefinitely.
+    //
+    // abort_callback is the mechanism intended for this: whisper.cpp polls it
+    // during decoding and unwinds cleanly when it returns true. Whatever text
+    // was decoded before the abort is still retrievable, so a timeout degrades
+    // to a partial result rather than an error.
+    struct deadline dl = {
+        .expires_at_ms = (timeout_ms > 0) ? now_ms() + (double) timeout_ms : 0.0,
+        .fired = false,
+    };
+    params.abort_callback = abort_on_deadline;
+    params.abort_callback_user_data = &dl;
 
     const char *language = NULL;
     if (language_str != NULL) {
@@ -104,12 +141,15 @@ Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio, JNI_ABORT);
 
-    if (rc != 0) {
-        LOGW("whisper_full failed with %d", rc);
+    const int n_segments = whisper_full_n_segments(context);
+
+    // A timed-out decode reports failure but leaves the segments it already
+    // produced intact, so prefer returning partial text over nothing. Only a
+    // failure with no segments at all is a real error.
+    if (rc != 0 && !(dl.fired && n_segments > 0)) {
+        LOGW("whisper_full failed with %d (segments=%d)", rc, n_segments);
         return NULL;
     }
-
-    const int n_segments = whisper_full_n_segments(context);
     size_t total = 1;
     for (int i = 0; i < n_segments; i++) {
         total += strlen(whisper_full_get_segment_text(context, i));

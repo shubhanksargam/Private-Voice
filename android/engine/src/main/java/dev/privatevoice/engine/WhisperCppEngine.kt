@@ -95,7 +95,7 @@ class WhisperCppEngine(
                 audioData = samples,
                 language = target,
                 translate = false,
-                maxTokens = MAX_TOKENS_PER_SEGMENT,
+                timeoutMs = DECODE_TIMEOUT_MS,
             ) ?: error("whisper_full failed for $id")
             val elapsed = (System.nanoTime() - started) / 1_000_000
 
@@ -138,14 +138,17 @@ class WhisperCppEngine(
         private const val WARMUP_SAMPLES = 8_000
 
         /**
-         * Safety bound on tokens emitted per segment. Whisper's own per-segment
-         * ceiling is 448; a hold-to-talk dictation utterance realistically needs
-         * well under 200 even in Devanagari, where byte-level BPE makes token
-         * counts run high (3 bytes per character). This exists so a degenerate
-         * decode can never hang the keyboard — see the warm-up note above for
-         * how that failure actually looks in practice.
+         * Wall-clock ceiling for a single decode. Generous relative to the
+         * ~1s a healthy `base` decode takes, because it is a safety net for
+         * pathological input, not a latency target — exceeding it means
+         * something has gone wrong, not that the user spoke for a long time.
+         *
+         * On timeout, whatever was decoded is returned rather than an error.
+         * A per-segment token cap was tried instead and made things worse: it
+         * can truncate before a timestamp token, leaving whisper.cpp's seek
+         * position stuck and re-decoding the same window forever.
          */
-        private const val MAX_TOKENS_PER_SEGMENT = 224
+        private const val DECODE_TIMEOUT_MS = 30_000
 
         /** ggml/BLAS/NEON feature flags the native build actually enabled. */
         fun systemInfo(): String = WhisperLib.getSystemInfo()
