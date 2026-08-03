@@ -15,6 +15,15 @@ if(NOT EXISTS ${WHISPER_DIR}/src/whisper.cpp)
         "Run:  python tools/setup_whispercpp.py")
 endif()
 
+# Always optimize the native code, including in debug builds. An unoptimized
+# ggml is 10-50x slower — slow enough that a warm-up decode looked like a hang
+# on-device (two threads pegged at 100% for minutes on 30s of audio) before
+# this was in place. Appending to the _DEBUG flags rather than overriding
+# CMAKE_BUILD_TYPE keeps -g, so native crashes are still debuggable; the last
+# -O flag on the command line wins.
+set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG} -O3")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O3")
+
 # ggml ships its own CMake project; build it as a subdirectory so we inherit
 # its ARM feature detection (dotprod/i8mm/fp16) rather than reimplementing it.
 set(GGML_BUILD_TESTS  OFF CACHE BOOL "" FORCE)

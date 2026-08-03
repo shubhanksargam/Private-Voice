@@ -58,10 +58,22 @@ class WhisperCppEngine(
     }
 
     override fun warmUp() {
-        // Half a second of silence. Forces GGML to allocate its compute buffers
-        // and spin up worker threads now, rather than during the first real
-        // utterance where the user would read it as a stutter.
-        transcribe(FloatArray(8_000), 16_000, defaultLanguage)
+        // Forces GGML to allocate its compute buffers and spin up worker
+        // threads now, rather than during the first real utterance where the
+        // user would read it as a stutter.
+        //
+        // Deliberately low-amplitude NOISE, not digital silence. Feeding
+        // whisper.cpp an all-zero buffer sends its greedy decoder into a
+        // hallucination loop that emits tokens until it hits internal limits —
+        // observed hanging a warm-up for minutes on-device, with the model
+        // itself having loaded in under a second. Real microphone input always
+        // carries a noise floor, so this is also closer to production input.
+        val noise = FloatArray(WARMUP_SAMPLES) { i ->
+            // Deterministic, tiny (~-60 dBFS): enough to break the all-zero
+            // degenerate case without being loud enough to decode as speech.
+            (((i * 1103515245 + 12345) ushr 16 and 0xFF) - 128) * (0.001f / 128f)
+        }
+        transcribe(noise, 16_000, defaultLanguage)
     }
 
     override fun transcribe(
@@ -83,6 +95,7 @@ class WhisperCppEngine(
                 audioData = samples,
                 language = target,
                 translate = false,
+                maxTokens = MAX_TOKENS_PER_SEGMENT,
             ) ?: error("whisper_full failed for $id")
             val elapsed = (System.nanoTime() - started) / 1_000_000
 
@@ -120,6 +133,19 @@ class WhisperCppEngine(
 
     companion object {
         private const val TAG = "WhisperCppEngine"
+
+        /** 0.5s at 16kHz — enough to force buffer allocation, short to run. */
+        private const val WARMUP_SAMPLES = 8_000
+
+        /**
+         * Safety bound on tokens emitted per segment. Whisper's own per-segment
+         * ceiling is 448; a hold-to-talk dictation utterance realistically needs
+         * well under 200 even in Devanagari, where byte-level BPE makes token
+         * counts run high (3 bytes per character). This exists so a degenerate
+         * decode can never hang the keyboard — see the warm-up note above for
+         * how that failure actually looks in practice.
+         */
+        private const val MAX_TOKENS_PER_SEGMENT = 224
 
         /** ggml/BLAS/NEON feature flags the native build actually enabled. */
         fun systemInfo(): String = WhisperLib.getSystemInfo()

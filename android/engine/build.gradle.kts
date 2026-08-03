@@ -24,6 +24,20 @@ android {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
                     "-DGGML_OPENMP=OFF",
+                    // ggml's ARM feature detection uses check_cxx_source_RUNS,
+                    // which cannot work when cross-compiling — the host can't
+                    // execute ARM test binaries. Left to itself it silently
+                    // finds nothing (HAVE_DOTPROD et al. come out empty) and
+                    // falls back to slow scalar matmul paths, which measured
+                    // ~4x slower than the ONNX backend on the same model.
+                    // GGML_CPU_ARM_ARCH bypasses the probing and sets -march
+                    // directly.
+                    //
+                    // Exynos 1380 = 4x Cortex-A78 + 4x Cortex-A55. Both are
+                    // ARMv8.2-A with FEAT_DotProd and FEAT_FP16. Neither has
+                    // i8mm/SMMLA (ARMv8.6), so it is deliberately not listed —
+                    // requesting it would build instructions this SoC traps on.
+                    "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16",
                 )
                 cppFlags += "-fexceptions"
             }

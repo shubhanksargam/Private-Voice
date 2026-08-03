@@ -58,7 +58,8 @@ Java_dev_privatevoice_engine_WhisperLib_freeContext(
 JNIEXPORT jstring JNICALL
 Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
-        jfloatArray audio_data, jstring language_str, jboolean translate) {
+        jfloatArray audio_data, jstring language_str, jboolean translate,
+        jint max_tokens) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     if (context == NULL) return NULL;
@@ -79,6 +80,12 @@ Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
     // poison the next.
     params.no_context = true;
     params.single_segment = false;
+    // Bounds a degenerate decode. Fed pure digital silence, greedy decoding
+    // will hallucinate and loop, emitting tokens until it hits an internal
+    // limit — long enough to look like a hang. Real mic input has a noise
+    // floor and doesn't trigger it, but a keyboard must not be one silent
+    // buffer away from locking up. 0 means whisper.cpp's default.
+    params.max_tokens = max_tokens;
 
     const char *language = NULL;
     if (language_str != NULL) {

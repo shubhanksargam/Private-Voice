@@ -61,11 +61,12 @@ class BenchmarkActivity : AppCompatActivity() {
         val audioDir = File(base, "eval").apply { mkdirs() }
         val outFile = File(base, "benchmark.json")
 
-        // Thread sweep covers "big cores only" (2, 4). 6 was tested once and
-        // measured worse across the board — the Exynos 1380's 4 little A55
-        // cores hurt more than the extra parallelism returns — so it's dropped
-        // to keep the sweep from re-spending time on a config already answered.
-        val threadCounts = listOf(2, 4)
+        // 4 threads only. 6 measured worse than 2 or 4 across the board (the
+        // Exynos 1380's four little A55 cores cost more than their added
+        // parallelism returns), and 4 consistently beat 2 on every model tried
+        // since. Sweeping the already-answered options just spends device
+        // minutes; override here if that assumption needs re-testing.
+        val threadCounts = listOf(4)
 
         lifecycleScope.launch {
             val report = withContext(Dispatchers.Default) {

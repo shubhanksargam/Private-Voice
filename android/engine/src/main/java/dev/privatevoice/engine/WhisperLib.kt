@@ -28,6 +28,9 @@ internal object WhisperLib {
      * segments joined.
      *
      * @param language BCP-47-ish tag ("en", "hi"), or null to auto-detect.
+     * @param maxTokens per-segment token ceiling, or 0 for whisper.cpp's
+     *   default (no extra limit). A bound here is what stops a degenerate
+     *   decode from running unbounded.
      * @return decoded text, or null if the native decode failed.
      */
     external fun fullTranscribeToString(
@@ -36,6 +39,7 @@ internal object WhisperLib {
         audioData: FloatArray,
         language: String?,
         translate: Boolean,
+        maxTokens: Int,
     ): String?
 
     external fun getSystemInfo(): String

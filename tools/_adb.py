@@ -40,10 +40,13 @@ def push_dir_to_app_storage(app_id: str, local_dir: Path, remote_subpath: str) -
             raise SystemExit(f"adb push to {staging} failed:\n{r.stderr}")
 
         remote = f"files/{remote_subpath}"
-        cmd = f"mkdir -p {remote} && cp -r {staging}/. {remote}/"
-        r = subprocess.run([ADB, "shell", "run-as", app_id, "sh", "-c", cmd],
+        # `adb shell` joins its argv with spaces and the device's shell re-splits
+        # them, so passing `sh -c` a multi-word command as a separate argv entry
+        # silently truncates it at the first space. Send one pre-quoted string.
+        inner = f"mkdir -p {remote} && cp -r {staging}/. {remote}/"
+        r = subprocess.run([ADB, "shell", f"run-as {app_id} sh -c '{inner}'"],
                            capture_output=True, text=True)
-        if r.returncode != 0:
-            raise SystemExit(f"run-as copy into {remote} failed:\n{r.stderr}")
+        if r.returncode != 0 or r.stderr.strip():
+            raise SystemExit(f"run-as copy into {remote} failed:\n{r.stdout}{r.stderr}")
     finally:
         subprocess.run([ADB, "shell", "rm", "-rf", staging], capture_output=True)

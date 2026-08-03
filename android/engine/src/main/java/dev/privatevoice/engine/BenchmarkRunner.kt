@@ -79,6 +79,7 @@ class BenchmarkRunner(
                 put("soc", socModel())
                 put("cpus", Runtime.getRuntime().availableProcessors())
                 put("sdk", android.os.Build.VERSION.SDK_INT)
+                put("ggml", runCatching { WhisperCppEngine.systemInfo() }.getOrDefault(""))
             })
             put("targetMillis", TARGET_MILLIS)
             put("results", results)
@@ -128,6 +129,16 @@ class BenchmarkRunner(
 
         if (candidates.isEmpty()) {
             progress.onLine("No usable models found.")
+        }
+
+        // Report which SIMD paths ggml actually compiled in. These are set at
+        // build time via GGML_CPU_ARM_ARCH because ggml's own detection can't
+        // run under cross-compilation; printing them here is what turns "should
+        // be enabled" into "is enabled", and a NEON/DOTPROD line reading 0
+        // means every timing below is measuring the slow scalar fallback.
+        val simd = runCatching { WhisperCppEngine.systemInfo() }.getOrNull()
+        if (simd != null) {
+            progress.onLine("ggml: $simd")
         }
 
         for (c in candidates) {
