@@ -1,0 +1,29 @@
+# Vendored sherpa-onnx — regenerate with: python tools/setup_sherpa.py
+android/engine/src/main/jniLibs/
+android/engine/src/main/vendor/
+
+# Downloaded model weights — regenerate with: python tools/fetch_models.py
+models/
+
+# Recorded evaluation audio. Keep eval/refs/ (transcripts) in git; audio is
+# large, and it is your voice — treat it as personal data, not source.
+eval/audio/
+eval/benchmark.json
+
+# Android / Gradle
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

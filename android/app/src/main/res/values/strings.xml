@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Private Voice</string>
+    <string name="benchmark_title">M0 Benchmark</string>
+    <string name="run_benchmark">Run benchmark</string>
+    <string name="benchmark_hint">Push models and audio first:\n\n  python tools/fetch_models.py --push\n\nThen tap Run benchmark.</string>
+</resources>

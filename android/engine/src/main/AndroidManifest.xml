@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Deliberately minimal. This module must never introduce android.permission.INTERNET.
+      See :app's noInternetPermission check, which fails the build if it appears
+      anywhere in the merged manifest.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+</manifest>
