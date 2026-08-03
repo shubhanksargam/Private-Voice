@@ -1,33 +1,32 @@
 # Session status — resume point
 
-Last updated: 2026-08-03. Repo at commit `eb9abe1` (4 commits, working tree clean).
+Last updated: 2026-08-03 (recordings completed). Repo at commit `0f8d6be` as of
+the last commit before this update — see `git log` for the latest.
 
 ## One-line state
 
-**The app builds and installs cleanly. Nothing has run on a phone yet.** The
-only remaining blockers are manual: connect the A35, and record the eval corpus.
+**The app builds cleanly, all 48 eval recordings are done and converted.** The
+only remaining step is connecting the A35 and running the benchmark — recording
+is no longer the bottleneck.
 
-## Do these two things next, in either order
+## Do this next
 
 ```powershell
-# A. Get numbers out of the phone
-#    (connect A35 via USB, enable USB debugging, accept the RSA prompt)
-python tools\fetch_models.py --push
+# Connect A35 via USB, enable USB debugging, accept the RSA prompt, then:
+python tools\fetch_models.py --push          # pushes tiny/base/small to the device
+python tools\prepare_audio.py --src recordings --push   # pushes the 48 WAVs
 python tools\bench_device.py
 # Reads eval/benchmark.json, applies the 2.5s-median gate, prints a verdict.
-
-# B. Record the 48-utterance eval corpus (no phone connection needed to start)
-python tools\make_refs.py --sheet          # prints all 48 prompts to read aloud
-# ...record each as <id>.wav/.m4a, e.g. en_001, hi_004, mix_012...
-winget install Gyan.FFmpeg                 # one-time, for format conversion
-python tools\prepare_audio.py --src <folder-with-recordings> --push
 ```
 
-Both are needed before M0 means anything: (A) alone tells you *speed* without
-knowing if the output is any good; (B) alone gives you references with nothing
-to score. `tools/bench_device.py` records transcripts alongside timings — a fast
-model returning garbage is not a pass, so read `eval/benchmark.json`, don't just
-trust the verdict line.
+`tools/bench_device.py` records transcripts alongside timings — a fast model
+returning garbage is not a pass, so read `eval/benchmark.json`, don't just trust
+the verdict line. Once it's run, score properly:
+
+```powershell
+python tools\eval_wer.py --refs eval\refs        # Devanagari
+python tools\eval_wer.py --refs eval\refs_latn   # Latin
+```
 
 ## What's actually been verified (not just written)
 
@@ -55,10 +54,10 @@ trust the verdict line.
   the wrong script gives 100% WER regardless of accuracy — this is *why*
   `eval/refs/` (Devanagari) and `eval/refs_latn/` (Latin) both exist; score
   against both once real audio exists.
-- **48 eval prompts + both reference sets generated** (`eval/prompts.jsonl` →
-  `eval/refs/*.txt`, `eval/refs_latn/*.txt`). Zero real recordings exist yet
-  (`eval/audio/` is empty) — this is the actual bottleneck right now, not
-  tooling or toolchain.
+- **All 48 eval recordings done and converted.** `eval/audio/` has all 48 WAVs
+  (16kHz mono 16-bit, via `tools/prepare_audio.py`) matching every id in
+  `eval/prompts.jsonl`. The only remaining blocker is connecting the A35 and
+  running the benchmark — recording is no longer the bottleneck.
 
 ## Three real bugs fixed getting to a green build (context if anything regresses)
 
@@ -88,7 +87,7 @@ Full narrative in `docs/SETUP.md` and the commit `eb9abe1` message.
 | `android/engine/src/main/jniLibs/arm64-v8a/` | Vendored `.so` files (gitignored, same regen command) |
 | `models/{tiny,base,small}/` | All downloaded, not yet pushed to a device |
 | `eval/prompts.jsonl`, `eval/refs/`, `eval/refs_latn/` | Committed, complete |
-| `eval/audio/` | Empty — **this is the actual blocker** |
+| `eval/audio/` | All 48 WAVs present (gitignored — it's your voice, not source) |
 | `%LOCALAPPDATA%\Android\Sdk` | Machine-local, not in repo. Regenerate per `docs/SETUP.md` if this is a different machine |
 
 ## If resuming on a different machine
