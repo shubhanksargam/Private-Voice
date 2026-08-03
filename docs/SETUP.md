@@ -90,16 +90,45 @@ Practical consequences:
 
 ## Evaluation audio
 
-The benchmark needs 16kHz mono 16-bit WAVs on the device at
-`/sdcard/Android/data/dev.privatevoice.app/files/eval/`.
-
-Name them `<split>_<id>.wav` with split in `en`, `hi`, `mix`, and put matching
-transcripts in `eval/refs/<split>_<id>.txt`. That convention is what gives you the
-per-language breakdown in `tools/eval_wer.py`.
+48 prompts ship in `eval/prompts.jsonl` — 12 Indian English, 12 Hindi, 24 Hinglish.
+References are generated from them, so recording is the only manual step.
 
 ```powershell
-adb push eval\audio\*.wav /sdcard/Android/data/dev.privatevoice.app/files/eval/
+python tools\make_refs.py --sheet          # print what to read aloud
+# ...record one clip per prompt, named <id> (en_001, hi_004, mix_012)
+winget install Gyan.FFmpeg                  # one time, for format conversion
+python tools\prepare_audio.py --src <recordings-folder> --push
 ```
 
-Record these yourself. Your accent and your particular Hinglish mix matter far more
-than any public benchmark, because you are the user.
+`prepare_audio.py` converts whatever your phone recorder produces into the 16kHz
+mono 16-bit WAV the models need, verifies filenames against the prompt ids, and
+tells you which prompts are still missing.
+
+Record these yourself, and speak the way you actually dictate. Your accent and your
+particular Hinglish mix matter far more than any public benchmark, because you are
+the user. Do not say punctuation out loud — inferring it is the entire reason we
+chose Whisper over a faster CTC model.
+
+### Two reference sets, deliberately
+
+`make_refs.py` writes both `eval/refs/` (Devanagari for hi/mix) and
+`eval/refs_latn/` (Latin). Score against both:
+
+```powershell
+python tools\eval_wer.py --refs eval\refs
+python tools\eval_wer.py --refs eval\refs_latn
+```
+
+This matters more than it looks. Scoring correct Hindi against the wrong script
+gives **100% WER** — verified, not hypothetical:
+
+| hypotheses | references | hi WER | mix WER |
+|---|---|---|---|
+| Devanagari | Devanagari | 0.00% | 0.00% |
+| Latin | Devanagari | 100.00% | 98.65% |
+
+So a single WER number cannot distinguish "the model misheard you" from "the model
+heard you perfectly and wrote it in the other script". Whisper emits Devanagari
+under `language=hi`, while most people *type* Hinglish in Latin. Running both tells
+you which problem you have — and a script mismatch is a transliteration
+post-processing job, not an ASR accuracy problem.

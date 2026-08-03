@@ -1,0 +1,48 @@
+{"id": "en_001", "prompt": "Please share the updated invoice by tomorrow morning.", "ref": "Please share the updated invoice by tomorrow morning."}
+{"id": "en_002", "prompt": "I will reach the office around quarter past ten.", "ref": "I will reach the office around quarter past ten."}
+{"id": "en_003", "prompt": "Can you confirm whether the meeting is at Whitefield or Koramangala?", "ref": "Can you confirm whether the meeting is at Whitefield or Koramangala?"}
+{"id": "en_004", "prompt": "Send me the account number and IFSC code once you get them.", "ref": "Send me the account number and IFSC code once you get them."}
+{"id": "en_005", "prompt": "My flight lands at eleven forty at Terminal 2.", "ref": "My flight lands at 11:40 at Terminal 2."}
+{"id": "en_006", "prompt": "Please transfer four thousand five hundred rupees to my account.", "ref": "Please transfer 4500 rupees to my account."}
+{"id": "en_007", "prompt": "The doctor asked me to come back after two weeks for a review.", "ref": "The doctor asked me to come back after two weeks for a review."}
+{"id": "en_008", "prompt": "I have attached the scanned copy of my Aadhaar card.", "ref": "I have attached the scanned copy of my Aadhaar card."}
+{"id": "en_009", "prompt": "Let me know if the slot on Thursday evening works for you.", "ref": "Let me know if the slot on Thursday evening works for you."}
+{"id": "en_010", "prompt": "Kindly do the needful and revert at the earliest.", "ref": "Kindly do the needful and revert at the earliest."}
+{"id": "en_011", "prompt": "We stayed at a hotel near MG Road for three nights.", "ref": "We stayed at a hotel near MG Road for three nights."}
+{"id": "en_012", "prompt": "I will call you back after the standup meeting.", "ref": "I will call you back after the standup meeting."}
+{"id": "hi_001", "prompt": "kripya mujhe kal tak jawab de dijiye", "ref": "कृपया मुझे कल तक जवाब दे दीजिए।", "ref_latn": "kripya mujhe kal tak jawab de dijiye"}
+{"id": "hi_002", "prompt": "main parso Delhi ja raha hoon", "ref": "मैं परसों दिल्ली जा रहा हूँ।", "ref_latn": "main parso Delhi ja raha hoon"}
+{"id": "hi_003", "prompt": "aapka pata kya hai, mujhe bhej dijiye", "ref": "आपका पता क्या है, मुझे भेज दीजिए।", "ref_latn": "aapka pata kya hai, mujhe bhej dijiye"}
+{"id": "hi_004", "prompt": "doctor ne do hafte baad bulaya hai", "ref": "डॉक्टर ने दो हफ़्ते बाद बुलाया है।", "ref_latn": "doctor ne do hafte baad bulaya hai"}
+{"id": "hi_005", "prompt": "mujhe paanch hazaar rupaye bhej do", "ref": "मुझे पाँच हज़ार रुपये भेज दो।", "ref_latn": "mujhe paanch hazaar rupaye bhej do"}
+{"id": "hi_006", "prompt": "aaj bahut tez baarish ho rahi hai", "ref": "आज बहुत तेज़ बारिश हो रही है।", "ref_latn": "aaj bahut tez baarish ho rahi hai"}
+{"id": "hi_007", "prompt": "train sadhe chaar baje pahunchegi", "ref": "ट्रेन साढ़े चार बजे पहुँचेगी।", "ref_latn": "train sadhe chaar baje pahunchegi"}
+{"id": "hi_008", "prompt": "kya tumne mera message dekha", "ref": "क्या तुमने मेरा मैसेज देखा?", "ref_latn": "kya tumne mera message dekha?"}
+{"id": "hi_009", "prompt": "yahan se station kitni door hai", "ref": "यहाँ से स्टेशन कितनी दूर है?", "ref_latn": "yahan se station kitni door hai?"}
+{"id": "hi_010", "prompt": "papa ne kaha hai ki jaldi ghar aa jana", "ref": "पापा ने कहा है कि जल्दी घर आ जाना।", "ref_latn": "papa ne kaha hai ki jaldi ghar aa jana"}
+{"id": "hi_011", "prompt": "mujhe thoda aur samay chahiye", "ref": "मुझे थोड़ा और समय चाहिए।", "ref_latn": "mujhe thoda aur samay chahiye"}
+{"id": "hi_012", "prompt": "bijli subah se nahi aa rahi hai", "ref": "बिजली सुबह से नहीं आ रही है।", "ref_latn": "bijli subah se nahi aa rahi hai"}
+{"id": "mix_001", "prompt": "Main office se nikal raha hoon, thodi der mein pahunch jaunga.", "ref": "मैं ऑफिस से निकल रहा हूँ, थोड़ी देर में पहुँच जाऊँगा।", "ref_latn": "main office se nikal raha hoon, thodi der mein pahunch jaunga"}
+{"id": "mix_002", "prompt": "Kal ka meeting cancel ho gaya hai, please team ko bata dena.", "ref": "कल का मीटिंग कैंसिल हो गया है, प्लीज़ टीम को बता देना।", "ref_latn": "kal ka meeting cancel ho gaya hai, please team ko bata dena"}
+{"id": "mix_003", "prompt": "Bhai, us file ka screenshot bhej de zara.", "ref": "भाई, उस फ़ाइल का स्क्रीनशॉट भेज दे ज़रा।", "ref_latn": "bhai, us file ka screenshot bhej de zara"}
+{"id": "mix_004", "prompt": "Payment ho gaya hai, UPI se transfer kar diya.", "ref": "पेमेंट हो गया है, यूपीआई से ट्रांसफ़र कर दिया।", "ref_latn": "payment ho gaya hai, UPI se transfer kar diya"}
+{"id": "mix_005", "prompt": "Traffic bahut zyada hai, main thoda late ho jaunga.", "ref": "ट्रैफ़िक बहुत ज़्यादा है, मैं थोड़ा लेट हो जाऊँगा।", "ref_latn": "traffic bahut zyada hai, main thoda late ho jaunga"}
+{"id": "mix_006", "prompt": "Aap mujhe apna address WhatsApp pe send kar dijiye.", "ref": "आप मुझे अपना एड्रेस व्हाट्सएप पे सेंड कर दीजिए।", "ref_latn": "aap mujhe apna address WhatsApp pe send kar dijiye"}
+{"id": "mix_007", "prompt": "Doctor ne kaha hai ki reports normal hain.", "ref": "डॉक्टर ने कहा है कि रिपोर्ट्स नॉर्मल हैं।", "ref_latn": "doctor ne kaha hai ki reports normal hain"}
+{"id": "mix_008", "prompt": "Weekend pe movie dekhne chalein kya?", "ref": "वीकेंड पे मूवी देखने चलें क्या?", "ref_latn": "weekend pe movie dekhne chalein kya?"}
+{"id": "mix_009", "prompt": "Mera phone ka battery low ho raha hai, baad mein call karta hoon.", "ref": "मेरा फ़ोन का बैटरी लो हो रहा है, बाद में कॉल करता हूँ।", "ref_latn": "mera phone ka battery low ho raha hai, baad mein call karta hoon"}
+{"id": "mix_010", "prompt": "Order place kar diya hai, delivery Tuesday tak aa jayegi.", "ref": "ऑर्डर प्लेस कर दिया है, डिलीवरी ट्यूज़डे तक आ जाएगी।", "ref_latn": "order place kar diya hai, delivery Tuesday tak aa jayegi"}
+{"id": "mix_011", "prompt": "Sir, mujhe kal half day leave chahiye.", "ref": "सर, मुझे कल हाफ़ डे लीव चाहिए।", "ref_latn": "sir, mujhe kal half day leave chahiye"}
+{"id": "mix_012", "prompt": "Ye wala design zyada better lag raha hai.", "ref": "ये वाला डिज़ाइन ज़्यादा बेटर लग रहा है।", "ref_latn": "ye wala design zyada better lag raha hai"}
+{"id": "mix_013", "prompt": "Internet slow chal raha hai, video call mein problem ho rahi hai.", "ref": "इंटरनेट स्लो चल रहा है, वीडियो कॉल में प्रॉब्लम हो रही है।", "ref_latn": "internet slow chal raha hai, video call mein problem ho rahi hai"}
+{"id": "mix_014", "prompt": "Maine already usko forward kar diya tha.", "ref": "मैंने ऑलरेडी उसको फ़ॉरवर्ड कर दिया था।", "ref_latn": "maine already usko forward kar diya tha"}
+{"id": "mix_015", "prompt": "Ghar pe guests aaye hain, thodi der baad baat karta hoon.", "ref": "घर पे गेस्ट्स आए हैं, थोड़ी देर बाद बात करता हूँ।", "ref_latn": "ghar pe guests aaye hain, thodi der baad baat karta hoon"}
+{"id": "mix_016", "prompt": "Iska price kitna hai, discount milega kya?", "ref": "इसका प्राइस कितना है, डिस्काउंट मिलेगा क्या?", "ref_latn": "iska price kitna hai, discount milega kya?"}
+{"id": "mix_017", "prompt": "Meeting teen baje hai conference room mein.", "ref": "मीटिंग 3 बजे है कॉन्फ्रेंस रूम में।", "ref_latn": "meeting 3 baje hai conference room mein"}
+{"id": "mix_018", "prompt": "Please ek reminder set kar dena kal subah ke liye.", "ref": "प्लीज़ एक रिमाइंडर सेट कर देना कल सुबह के लिए।", "ref_latn": "please ek reminder set kar dena kal subah ke liye"}
+{"id": "mix_019", "prompt": "Uska naam Priya hai, wo marketing team mein hai.", "ref": "उसका नाम प्रिया है, वो मार्केटिंग टीम में है।", "ref_latn": "uska naam Priya hai, wo marketing team mein hai"}
+{"id": "mix_020", "prompt": "Cab book kar li hai, driver das minute mein aa jayega.", "ref": "कैब बुक कर ली है, ड्राइवर 10 मिनट में आ जाएगा।", "ref_latn": "cab book kar li hai, driver 10 minute mein aa jayega"}
+{"id": "mix_021", "prompt": "Maine form submit kar diya but confirmation nahi aaya.", "ref": "मैंने फ़ॉर्म सबमिट कर दिया बट कन्फ़र्मेशन नहीं आया।", "ref_latn": "maine form submit kar diya but confirmation nahi aaya"}
+{"id": "mix_022", "prompt": "Aaj ka target complete ho gaya, kal se new project start hoga.", "ref": "आज का टारगेट कंप्लीट हो गया, कल से न्यू प्रोजेक्ट स्टार्ट होगा।", "ref_latn": "aaj ka target complete ho gaya, kal se new project start hoga"}
+{"id": "mix_023", "prompt": "Thoda sa sugar kam dalna, main diabetic hoon.", "ref": "थोड़ा सा शुगर कम डालना, मैं डायबिटिक हूँ।", "ref_latn": "thoda sa sugar kam dalna, main diabetic hoon"}
+{"id": "mix_024", "prompt": "Flight delay ho gayi hai, ab nau baje ki hai.", "ref": "फ़्लाइट डिले हो गई है, अब 9 बजे की है।", "ref_latn": "flight delay ho gayi hai, ab 9 baje ki hai"}
