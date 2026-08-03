@@ -158,6 +158,77 @@ blocking the rest of the app on a fine-tune that hasn't happened yet.
 
 ---
 
+# whisper.cpp backend results (2026-08-04)
+
+Measured after replacing sherpa-onnx with whisper.cpp — see the CORRECTION
+section below for why that swap was necessary.
+
+## Latency, GGML q8_0, 4 threads, on a healthy (cool) device
+
+| model | median | verdict |
+|---|---|---|
+| `ggml-base-q8_0` | **1447ms** | ✅ PASS |
+| `ggml-small-q8_0` | ~3970ms | ❌ over the 2500ms budget |
+
+`base` is comfortably within budget and matches what the ONNX backend achieved
+(1030ms), while decoding Devanagari correctly — which the ONNX backend did not.
+
+**Quantization format is worth ~3x on ARM and is easy to get wrong.** ggml has
+optimized dot-product kernels for q8_0 but not q5_1. Same model, same threads:
+
+| quantization | base median |
+|---|---|
+| q5_1 | ~3500-3900ms |
+| **q8_0** | **~1000-1200ms** |
+
+Benchmarking q5_1 and stopping there would have wrongly concluded whisper.cpp
+was too slow to use at all.
+
+## `small` is not merely slow — it is intermittently non-terminating
+
+Beyond its ~4s median, `ggml-small-q8_0` sporadically fails to decode at all.
+On `hi_002` — a ~3.5s utterance it usually handles in ~4.3s — it ran past a
+30-second abort budget with zero segments produced (`whisper_full` returns -9).
+Reproduced across three independent runs.
+
+The mechanism is whisper.cpp's temperature-fallback chain: a decode that trips
+its entropy/logprob thresholds is retried at successively higher temperatures,
+up to six full decodes. On Hindi, where the model is least confident, fallback
+fires often; six times ~4.3s exceeds any usable budget. Observed on one run:
+most Hindi utterances ~4.3s, `hi_002` at 14.3s (~3 retries), several timing out.
+
+Disabling the fallback (`temperature_inc = 0.0f`) was tried and is **worse** —
+even `base`, previously a clean 1447ms, then timed out during warm-up. The
+fallback chain doubles as an escape hatch from decodes that fail to advance
+whisper.cpp's seek position. Bound the work with `abort_callback` instead and
+leave the default alone.
+
+**For a keyboard this is disqualifying independently of the median.** A model
+that intermittently produces nothing cannot back a dictation key.
+
+## ⚠️ Measurements after ~01:50 on 2026-08-04 are INVALID
+
+Roughly three hours of continuous benchmarking left the A35 in a degraded state
+that silently corrupted later runs, including a `base` re-measurement that
+"failed" everything despite `base` being fine an hour earlier:
+
+- **Thermal cap:** big-core `scaling_max_freq` pinned to 1728000 of 2400000
+  (72%). Battery peaked at 39.8°C.
+- **Memory pressure:** 2.1GB swapped out, ~300MB of 7.6GB RAM free — the device
+  was thrashing.
+
+Neither explains a >20x slowdown alone; together they do. One wrong inference
+was drawn from this data before the cause was found (the `temperature_inc`
+hypothesis above), which is the concrete cost of benchmarking a saturated
+device.
+
+**Any future sweep must start from a cool, rebooted phone**, and long sweeps
+should be split with cooldown gaps. `base`'s 1447ms and `small`'s ~4s were both
+captured early while the device was healthy and are the numbers to trust; the
+`small` WER scoring is still outstanding because no clean full run completed.
+
+---
+
 # ⚠️ CORRECTION (2026-08-04, same day): the Hindi numbers above are a
 # measurement artifact, not model accuracy
 

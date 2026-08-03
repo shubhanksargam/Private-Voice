@@ -175,7 +175,15 @@ class BenchmarkRunner(
         }
 
         return engine.use {
-            it.warmUp()
+            // Best-effort. A failed warm-up costs only the buffer-allocation
+            // time folded into the first real utterance; letting it throw
+            // aborted whole sweeps before this guard existed.
+            try {
+                it.warmUp()
+            } catch (t: Throwable) {
+                Log.w(TAG, "warm-up failed for ${c.id}", t)
+                progress.onLine("   warm-up failed (continuing): ${t.message}")
+            }
 
             val perUtterance = JSONArray()
             val allTimings = mutableListOf<Long>()

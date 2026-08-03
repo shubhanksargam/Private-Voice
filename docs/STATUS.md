@@ -3,6 +3,30 @@
 Last updated: 2026-08-04. M0 is done — see `docs/M0_RESULTS.md` for the full
 writeup. This file is the short version plus what's next.
 
+## Latest: whisper.cpp backend built and measured (2026-08-04)
+
+The ASR backend was swapped from sherpa-onnx to whisper.cpp and the sweep
+re-run. Full detail in `docs/M0_RESULTS.md`; the short version:
+
+- **`ggml-base-q8_0` @ 4 threads: 1447ms — PASS**, and unlike the old backend
+  it decodes Devanagari correctly.
+- **`ggml-small-q8_0`: ~3970ms, over budget, and intermittently
+  non-terminating** (>30s with zero output on some Hindi utterances,
+  reproduced across three runs). Disqualifying for a keyboard regardless of
+  the median.
+- **Quantization format is worth ~3x on ARM** — q8_0 has optimized dot-product
+  kernels in ggml, q5_1 does not. Getting this wrong makes whisper.cpp look
+  unusable.
+
+**Do this before any further device work: reboot the phone and let it cool.**
+Roughly three hours of continuous benchmarking left it thermally capped (big
+cores at 72%) and thrashing (2.1GB swapped, ~300MB free), which silently
+corrupted every measurement after ~01:50 — including one that made `base`
+look broken when it isn't. Split long sweeps with cooldown gaps.
+
+**Still outstanding:** `small`'s WER on-device. No clean full run completed,
+so the accuracy comparison rests on the desktop numbers below.
+
 ## One-line state
 
 **M0's latency results stand; its Hindi accuracy results were invalid and have

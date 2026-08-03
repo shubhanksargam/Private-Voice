@@ -105,6 +105,20 @@ Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
     params.no_context = true;
     params.single_segment = false;
 
+    // NOTE: temperature fallback is deliberately LEFT ENABLED (the default).
+    //
+    // It looks like an obvious latency win to disable: when a decode trips
+    // whisper.cpp's entropy/logprob thresholds it retries at successively
+    // higher temperatures, up to six full decodes, which on ggml-small-q8_0
+    // turned ~4.3s utterances into 14.3s and sometimes past a 30s budget.
+    //
+    // Setting temperature_inc = 0.0f was tried and made things strictly
+    // worse: even ggml-base — previously a clean 1447ms median — then timed
+    // out during warm-up. The fallback chain is also an escape hatch from
+    // decodes that fail to advance whisper.cpp's seek position, so removing
+    // it trades an occasional slow decode for an occasional non-terminating
+    // one. Keep the default and bound the work with abort_callback instead.
+
     // Bound the decode by wall-clock, not by token count.
     //
     // params.max_tokens was tried first and is actively harmful here: it caps
