@@ -44,9 +44,10 @@ trust the verdict line.
   Kotlin API files at v1.13.4, wired via the `kotlin.directories` source-set
   API (built-in Kotlin doesn't read `java.srcDirs` the way the old plugin did
   — this cost a debugging cycle, see `docs/SETUP.md`).
-- **Whisper `tiny` (int8) downloaded** to `models/tiny/` (~99MB). `base` and
-  `small` are not yet downloaded — `fetch_models.py --push` with no `--models`
-  filter gets all three.
+- **All three Whisper sizes downloaded** — `tiny`, `base`, `small` under
+  `models/`, both int8 and full precision each (~99MB / ~450MB / ~1.3GB on
+  disk respectively). Not yet pushed to a device. `ffmpeg` also installed
+  (winget, `Gyan.FFmpeg` 8.1.2) for `tools/prepare_audio.py`.
 - **Eval pipeline validated end-to-end with synthetic checks**: scored
   references against themselves → exactly 0.00% WER/CER on every split
   (confirms the Devanagari normalisation — nukta, ZWJ/ZWNJ, danda, digit
@@ -85,7 +86,7 @@ Full narrative in `docs/SETUP.md` and the commit `eb9abe1` message.
 | `android/` | Gradle project, builds clean. `local.properties` and `gradlew.bat`/wrapper jar present (gitignored / committed respectively) |
 | `android/engine/src/main/vendor/` | Vendored sherpa-onnx Kotlin sources (gitignored — regenerate with `python tools/setup_sherpa.py`) |
 | `android/engine/src/main/jniLibs/arm64-v8a/` | Vendored `.so` files (gitignored, same regen command) |
-| `models/tiny/` | Downloaded, not yet pushed to a device |
+| `models/{tiny,base,small}/` | All downloaded, not yet pushed to a device |
 | `eval/prompts.jsonl`, `eval/refs/`, `eval/refs_latn/` | Committed, complete |
 | `eval/audio/` | Empty — **this is the actual blocker** |
 | `%LOCALAPPDATA%\Android\Sdk` | Machine-local, not in repo. Regenerate per `docs/SETUP.md` if this is a different machine |
