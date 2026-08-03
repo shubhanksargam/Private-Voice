@@ -14,9 +14,17 @@ import java.io.File
 /**
  * M0 harness. Deliberately ugly — it exists to produce numbers, not to be a UI.
  *
- * Expects, under the app's external files dir (adb-pushable, no permission needed):
+ * Expects, under the app's INTERNAL storage (filesDir, not external):
  *   files/models/<model-name>/{encoder, decoder, tokens}.onnx-or-txt
  *   files/eval/ - WAV files, 16kHz mono 16-bit
+ *
+ * Internal, not external: this device's FUSE-mediated external/shared storage
+ * (both the app's own Android/data/ dir and public Download/) blocks reads from
+ * a different UID even via `run-as` — plain `adb push` into Android/data/<pkg>
+ * leaves files invisible to the app's own File.listFiles(). Internal storage
+ * is a regular Linux directory with plain UNIX permissions, so `run-as <pkg> cp
+ * ...` reliably lands files where the app can actually see them. See
+ * docs/SETUP.md for the staging recipe.
  *
  * Populate both with: python tools/fetch_models.py --push
  * Drive headlessly and tabulate with: python tools/bench_device.py
@@ -45,16 +53,16 @@ class BenchmarkActivity : AppCompatActivity() {
         append("Budget: ${BenchmarkRunner.TARGET_MILLIS}ms per utterance")
         append("")
 
-        val base = getExternalFilesDir(null) ?: filesDir
+        val base = filesDir
         val modelsDir = File(base, "models").apply { mkdirs() }
         val audioDir = File(base, "eval").apply { mkdirs() }
         val outFile = File(base, "benchmark.json")
 
-        // Thread sweep covers "big cores only" (4) and over-subscription (6).
-        // The Exynos 1380 pairs 4xA78 with 4xA55; scheduling onto the little
-        // cores usually costs more than the extra parallelism returns, and this
-        // is the cheapest way to confirm that rather than assume it.
-        val threadCounts = listOf(2, 4, 6)
+        // Thread sweep covers "big cores only" (2, 4). 6 was tested once and
+        // measured worse across the board — the Exynos 1380's 4 little A55
+        // cores hurt more than the extra parallelism returns — so it's dropped
+        // to keep the sweep from re-spending time on a config already answered.
+        val threadCounts = listOf(2, 4)
 
         lifecycleScope.launch {
             val report = withContext(Dispatchers.Default) {
@@ -62,6 +70,8 @@ class BenchmarkActivity : AppCompatActivity() {
                     modelsDir = modelsDir,
                     audioDir = audioDir,
                     threadCounts = threadCounts,
+                    includeFullPrecision = false,
+                    outFile = outFile,
                 ).run { line ->
                     Log.i(TAG, line)
                     lifecycleScope.launch { append(line) }

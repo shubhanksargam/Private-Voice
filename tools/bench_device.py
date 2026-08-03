@@ -24,8 +24,13 @@ from _adb import ADB
 
 APP_ID = "dev.privatevoice.app"
 ACTIVITY = f"{APP_ID}/.BenchmarkActivity"
-DEVICE_BASE = f"/sdcard/Android/data/{APP_ID}/files"
-DEVICE_JSON = f"{DEVICE_BASE}/benchmark.json"
+# Internal storage (files/... relative to run-as's cwd), not external. This
+# device's FUSE-mediated external/shared storage silently hides files written
+# by a different UID from the app's own File.listFiles() — confirmed by
+# writing there and finding the app simply couldn't see them. Internal storage
+# is a plain Linux directory, so `run-as` reads/writes it exactly as the app
+# would. See docs/SETUP.md.
+DEVICE_JSON = "files/benchmark.json"
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCAL_JSON = ROOT / "eval" / "benchmark.json"
@@ -63,8 +68,15 @@ def build_and_install() -> None:
 
 def run_benchmark(timeout_s: int) -> None:
     adb("shell", "am", "force-stop", APP_ID)
-    adb("shell", "rm", "-f", DEVICE_JSON)
+    adb("shell", "run-as", APP_ID, "rm", "-f", DEVICE_JSON)
     adb("logcat", "-c")
+
+    # Doze/App Standby can throttle a backgrounded CPU-heavy coroutine to a
+    # dead stop the moment the screen locks — cost over an hour of stalls
+    # before this was in place. Both are required; screen-on alone isn't
+    # enough if the device later re-enters Doze for another reason.
+    adb("shell", "dumpsys", "deviceidle", "whitelist", f"+{APP_ID}")
+    adb("shell", "svc", "power", "stayon", "true")
 
     print("Starting benchmark on device ...")
     adb("shell", "am", "start", "-n", ACTIVITY, "--ez", "autorun", "true", check=True)
@@ -88,11 +100,15 @@ def run_benchmark(timeout_s: int) -> None:
 
 
 def pull() -> dict:
+    # Plain `adb pull` can't read internal storage without root; `exec-out
+    # run-as` reads the file as the app's own UID and streams the bytes back
+    # over adb's binary-safe channel (plain `adb shell` mangles line endings).
     LOCAL_JSON.parent.mkdir(parents=True, exist_ok=True)
-    r = adb("pull", DEVICE_JSON, str(LOCAL_JSON))
-    if r.returncode != 0:
-        raise SystemExit(f"Could not pull {DEVICE_JSON}:\n{r.stderr}")
-    return json.loads(LOCAL_JSON.read_text(encoding="utf-8"))
+    r = subprocess.run([ADB, "exec-out", "run-as", APP_ID, "cat", DEVICE_JSON], capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        raise SystemExit(f"Could not read {DEVICE_JSON} via run-as:\n{r.stderr.decode(errors='replace')}")
+    LOCAL_JSON.write_bytes(r.stdout)
+    return json.loads(r.stdout.decode("utf-8"))
 
 
 def tabulate(report: dict) -> None:
@@ -156,7 +172,7 @@ def main() -> int:
     if args.report:
         if not LOCAL_JSON.exists():
             raise SystemExit(f"{LOCAL_JSON} not found — run a benchmark first.")
-        tabulate(json.loads(LOCAL_JSON.read_text(encoding="utf-8")))
+        tabulate(json.loads(LOCAL_JSON.read_text(encoding="utf-8-sig")))
         return 0
 
     if not args.no_build:

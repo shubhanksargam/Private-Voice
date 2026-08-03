@@ -22,14 +22,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _adb import ADB
+from _adb import ADB, push_dir_to_app_storage
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPTS = ROOT / "eval" / "prompts.jsonl"
 OUT = ROOT / "eval" / "audio"
 
 APP_ID = "dev.privatevoice.app"
-DEVICE_EVAL = f"/sdcard/Android/data/{APP_ID}/files/eval"
 
 AUDIO_EXT = {".m4a", ".mp3", ".wav", ".opus", ".ogg", ".amr", ".aac", ".flac", ".3gp", ".mp4"}
 
@@ -74,14 +73,12 @@ def convert(ffmpeg: str, src: Path, dest: Path) -> bool:
 
 
 def push() -> None:
-    subprocess.run([ADB, "shell", "mkdir", "-p", DEVICE_EVAL], capture_output=True)
     files = sorted(OUT.glob("*.wav"))
-    for f in files:
-        r = subprocess.run([ADB, "push", str(f), f"{DEVICE_EVAL}/{f.name}"],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  push {f.name} FAILED: {r.stderr.strip()}")
-    print(f"Pushed {len(files)} file(s) to {DEVICE_EVAL}")
+    if not files:
+        print("Nothing to push — no WAVs in eval/audio/ yet.")
+        return
+    push_dir_to_app_storage(APP_ID, OUT, "eval")
+    print(f"Pushed {len(files)} file(s) to {APP_ID}'s internal files/eval/")
 
 
 def main() -> int:

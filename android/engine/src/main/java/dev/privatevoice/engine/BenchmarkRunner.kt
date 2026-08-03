@@ -22,9 +22,21 @@ import java.io.File
 class BenchmarkRunner(
     private val modelsDir: File,
     private val audioDir: File,
-    private val threadCounts: List<Int> = listOf(2, 4, 6),
+    private val threadCounts: List<Int> = listOf(2, 4),
     private val repeats: Int = 3,
-    private val language: String? = null,
+    /** Overrides per-file language detection for every WAV. Leave null for the
+     *  normal case: language is derived per file from its eval-corpus prefix
+     *  (en_/hi_/mix_), since a fixed language forces Whisper to decode Hindi
+     *  speech as English — it doesn't transcribe, it mistranslates. */
+    private val languageOverride: String? = null,
+    /** Test the full-precision (fp32) weights alongside int8. Off by default:
+     *  fp32-on-phone-CPU runs 3-5x slower than int8 for no accuracy most
+     *  shipping decisions would trade for, so it burns hours of device time
+     *  without changing which model gets chosen. */
+    private val includeFullPrecision: Boolean = false,
+    /** Written after every completed config, not just at the end, so killing
+     *  the app mid-sweep (or a crash) never loses configs already measured. */
+    private val outFile: File? = null,
 ) {
 
     fun interface Progress {
@@ -32,8 +44,9 @@ class BenchmarkRunner(
     }
 
     /**
-     * @return the benchmark report as JSON. Also written to disk by the caller so
-     *   tools/bench_device.py can pull and tabulate it.
+     * @return the benchmark report as JSON. Also incrementally written to
+     *   [outFile] if provided, so tools/bench_device.py can pull partial
+     *   results even from an interrupted run.
      */
     fun run(progress: Progress = Progress { }): JSONObject {
         val modelDirs = modelsDir.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name }.orEmpty()
@@ -52,23 +65,9 @@ class BenchmarkRunner(
         }
 
         val results = JSONArray()
+        val precisions = if (includeFullPrecision) listOf(true, false) else listOf(true)
 
-        for (modelDir in modelDirs) {
-            for (preferInt8 in listOf(true, false)) {
-                for (threads in threadCounts) {
-                    val spec = ModelSpec.discover(modelDir, threads, preferInt8) ?: continue
-                    // discover() falls back to whichever precision exists, so the
-                    // int8/full loop can yield the same spec twice. Skip the repeat.
-                    if (results.alreadyHas(spec.id)) continue
-
-                    progress.onLine("── ${spec.id}")
-                    val entry = benchmarkOne(spec, wavs, progress) ?: continue
-                    results.put(entry)
-                }
-            }
-        }
-
-        return JSONObject().apply {
+        fun report() = JSONObject().apply {
             put("device", JSONObject().apply {
                 put("model", android.os.Build.MODEL)
                 put("soc", socModel())
@@ -78,11 +77,29 @@ class BenchmarkRunner(
             put("targetMillis", TARGET_MILLIS)
             put("results", results)
         }
+
+        for (modelDir in modelDirs) {
+            for (preferInt8 in precisions) {
+                for (threads in threadCounts) {
+                    val spec = ModelSpec.discover(modelDir, threads, preferInt8) ?: continue
+                    // discover() falls back to whichever precision exists, so the
+                    // int8/full loop can yield the same spec twice. Skip the repeat.
+                    if (results.alreadyHas(spec.id)) continue
+
+                    progress.onLine("── ${spec.id}")
+                    val entry = benchmarkOne(spec, wavs, progress) ?: continue
+                    results.put(entry)
+                    outFile?.writeText(report().toString(2))
+                }
+            }
+        }
+
+        return report()
     }
 
     private fun benchmarkOne(spec: ModelSpec, wavs: List<File>, progress: Progress): JSONObject? {
         val engine = try {
-            SherpaWhisperEngine(spec, defaultLanguage = language ?: "en")
+            SherpaWhisperEngine(spec, defaultLanguage = languageOverride ?: "en")
         } catch (t: Throwable) {
             // A model that fails to load is a data point, not a crash. Record and move on.
             Log.e(TAG, "Failed to load ${spec.id}", t)
@@ -107,10 +124,11 @@ class BenchmarkRunner(
                     continue
                 }
 
+                val lang = languageOverride ?: languageForFile(wav.name)
                 val timings = mutableListOf<Long>()
                 var text = ""
                 repeat(repeats) {
-                    val result = engine.transcribe(audio.samples, audio.sampleRate, language)
+                    val result = engine.transcribe(audio.samples, audio.sampleRate, lang)
                     timings += result.decodeMillis
                     text = result.text
                 }
@@ -124,6 +142,7 @@ class BenchmarkRunner(
 
                 perUtterance.put(JSONObject().apply {
                     put("file", wav.name)
+                    put("language", lang)
                     put("durationSec", audio.durationSeconds)
                     put("medianMillis", median)
                     put("rtf", rtf)
@@ -161,6 +180,19 @@ class BenchmarkRunner(
 
     private fun JSONArray.alreadyHas(id: String): Boolean =
         (0 until length()).any { optJSONObject(it)?.optString("id") == id }
+
+    /**
+     * Maps the eval corpus's naming convention (en_/hi_/mix_, see
+     * eval/prompts.jsonl) to a Whisper language tag. Whisper has no
+     * "code-switched" tag, so mix_ (Hinglish) uses "hi" — the closer of the two
+     * available options, since its Hindi decoder tolerates embedded English
+     * words far better than its English decoder tolerates Hindi ones.
+     */
+    private fun languageForFile(name: String): String = when {
+        name.startsWith("hi_") -> "hi"
+        name.startsWith("mix_") -> "hi"
+        else -> "en"
+    }
 
     companion object {
         private const val TAG = "BenchmarkRunner"

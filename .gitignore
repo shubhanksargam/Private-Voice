@@ -9,6 +9,7 @@ models/
 # large, and it is your voice — treat it as personal data, not source.
 eval/audio/
 eval/benchmark.json
+recordings/
 
 # Android / Gradle
 *.iml

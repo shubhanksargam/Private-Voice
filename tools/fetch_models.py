@@ -23,10 +23,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from _adb import ADB
+from _adb import ADB, push_dir_to_app_storage
 
 APP_ID = "dev.privatevoice.app"
-DEVICE_BASE = f"/sdcard/Android/data/{APP_ID}/files"
+# Internal storage, relative to the app's own files/ dir. See
+# _adb.push_dir_to_app_storage for why not external storage.
 
 # Hugging Face repos, keyed by the local directory name we give them.
 MODELS = {
@@ -109,25 +110,17 @@ def ensure_device() -> None:
 
 def push(names: list[str]) -> None:
     ensure_device()
-    # The app must have run once for its external files dir to exist.
-    adb("shell", "mkdir", "-p", f"{DEVICE_BASE}/models", f"{DEVICE_BASE}/eval")
 
     for name in names:
         local = MODELS_DIR / name
         if not local.is_dir():
             print(f"  skip {name}: not downloaded")
             continue
-        remote = f"{DEVICE_BASE}/models/{name}"
-        adb("shell", "mkdir", "-p", remote)
-        for f in sorted(local.iterdir()):
-            print(f"  push {name}/{f.name}")
-            r = adb("push", str(f), f"{remote}/{f.name}")
-            if r.returncode != 0:
-                print(f"    FAILED: {r.stderr.strip()}")
+        print(f"  staging {name} ({sum(f.stat().st_size for f in local.iterdir())/1e6:.0f} MB)...")
+        push_dir_to_app_storage(APP_ID, local, f"models/{name}")
 
-    print(f"\nModels are on device at {DEVICE_BASE}/models")
-    print(f"Put 16kHz mono WAVs in {DEVICE_BASE}/eval before benchmarking:")
-    print(f"  adb push eval/audio/*.wav {DEVICE_BASE}/eval/")
+    print(f"\nModels are on device at {APP_ID}'s internal files/models/")
+    print("Push eval audio too: python tools/prepare_audio.py --src <folder> --push")
 
 
 def main() -> int:

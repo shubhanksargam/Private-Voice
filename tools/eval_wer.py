@@ -72,25 +72,36 @@ def levenshtein(a: list, b: list) -> int:
     return prev[-1]
 
 
-def load_hyps(path: Path) -> dict[str, str]:
+def load_hyps(path: Path, model_id: str | None = None) -> dict[str, str]:
     """Accept either a benchmark.json or a {"file","text"} JSONL."""
+    # utf-8-sig transparently strips a BOM if present and is a no-op otherwise —
+    # `adb exec-out`/PowerShell redirects routinely add one on Windows.
     if path.suffix == ".jsonl":
         out = {}
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
             if line.strip():
                 rec = json.loads(line)
                 out[Path(rec["file"]).stem] = rec["text"]
         return out
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     results = data.get("results", [])
     if not results:
         raise SystemExit(f"No results in {path}")
 
-    # A benchmark sweep holds many models. Score the fastest passing one unless
-    # told otherwise — but say which, so the number is never ambiguous.
-    passing = [r for r in results if r.get("verdict") == "PASS"] or results
-    chosen = min(passing, key=lambda r: r.get("medianMillis") or 1 << 30)
+    if model_id:
+        matches = [r for r in results if r.get("id") == model_id]
+        if not matches:
+            available = ", ".join(r.get("id", "?") for r in results)
+            raise SystemExit(f"No config '{model_id}' in {path}. Available: {available}")
+        chosen = matches[0]
+    else:
+        # A benchmark sweep holds many models. Default to the fastest passing
+        # one — but say which, so the number is never ambiguous, and pass
+        # --model to score a specific config (e.g. the gate winner, which
+        # isn't always the fastest).
+        passing = [r for r in results if r.get("verdict") == "PASS"] or results
+        chosen = min(passing, key=lambda r: r.get("medianMillis") or 1 << 30)
     print(f"Scoring model: {chosen.get('id')}\n")
     return {Path(u["file"]).stem: u.get("text", "") for u in chosen.get("utterances", [])}
 
@@ -165,13 +176,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--hyp", type=Path, default=ROOT / "eval" / "benchmark.json")
     ap.add_argument("--refs", type=Path, default=ROOT / "eval" / "refs")
+    ap.add_argument("--model", help="score this config id instead of the fastest PASS (e.g. base-int8-t4)")
     ap.add_argument("--fold-anusvara", action="store_true",
                     help="treat chandrabindu and anusvara as equivalent")
     args = ap.parse_args()
 
     if not args.hyp.exists():
         raise SystemExit(f"No hypotheses at {args.hyp}")
-    score(load_hyps(args.hyp), load_refs(args.refs), args.fold_anusvara)
+    score(load_hyps(args.hyp, args.model), load_refs(args.refs), args.fold_anusvara)
     return 0
 
 
