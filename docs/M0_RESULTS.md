@@ -53,6 +53,48 @@ while people generally type Hinglish in Latin (see `tools/eval_wer.py`):
 
 (`en` is identical across both since English has no script variant.)
 
+## Accuracy: `small-int8-t4` (failed the timing gate, scored anyway)
+
+Worth knowing even though `small` can't ship as-is: does more model capacity
+actually buy better Hindi/Hinglish, or is the ceiling elsewhere? Scored using
+the same corpus despite the timing failure, since the JSON already has its
+transcripts.
+
+**vs Devanagari:**
+
+| split | n | WER | CER |
+|---|---|---|---|
+| en | 12 | 14.17% | 4.33% |
+| hi | 12 | 90.91% | 62.36% |
+| mix | 24 | 89.69% | 72.72% |
+| **ALL** | 48 | **68.33%** | **49.41%** |
+
+**vs Latin:**
+
+| split | n | WER | CER |
+|---|---|---|---|
+| en | 12 | 14.17% | 4.33% |
+| hi | 12 | 100.00% | 100.00% |
+| mix | 24 | 99.10% | 98.32% |
+| **ALL** | 48 | **75.00%** | **71.88%** |
+
+**Reading this against `base`:** English improves meaningfully (20.00% →
+14.17% WER). Hindi CER improves substantially too (112.92% → 62.36% — roughly
+half the character-level error), suggesting `small` really is getting closer
+to the right sounds, not just noise. But word-level accuracy stays
+catastrophic either way (90%+ WER), and `small` commits to Devanagari more
+consistently than `base` (worse on the Latin-scored comparison, better on the
+Devanagari one — the opposite pattern from a model that's actually hedging
+between scripts).
+
+**The actual implication: going from 74M-ish `base` to a 2.4x larger `small`
+narrows the gap but doesn't come close to closing it.** That argues against
+"just use a bigger stock Whisper" as the fix — model scale alone isn't the
+lever. It's a point in favour of fine-tuning on real Hindi/Hinglish data
+specifically, over waiting for a speed optimisation on `small` to pay off:
+even a `small` that somehow ran in budget would likely still fail the
+accuracy bar.
+
 ## The actual finding
 
 **`base-int8` passes the latency gate but fails the accuracy bar for Hindi and
@@ -64,9 +106,9 @@ Voice Typing delivers — mostly named-entity mishears ("Whitefield" →
 
 This creates a genuine tension, not a simple pick:
 - **`base`**: fast enough, not accurate enough on the languages that matter most.
-- **`small`**: plausibly more accurate (committed to Devanagari script rather
-  than `base`'s garbled Latin transliteration, though still frequently wrong),
-  but **2x over the latency budget** regardless of thread count.
+- **`small`**: somewhat more accurate (character-level Hindi error roughly
+  halved vs `base`), still nowhere close to usable, and **2x over the latency
+  budget** regardless of thread count.
 
 Neither model, as tested, delivers on "beat Google on Hindi/Hinglish." This
 was flagged as the likely outcome going in — published code-switch WER
@@ -74,21 +116,30 @@ across models runs 27-70%, and multilingual Whisper's Hindi is known to be
 weaker than English — but seeing it confirmed on-device, at this magnitude,
 is the actual answer M0 was built to produce.
 
+**Model size alone is not the lever.** Going from `base` (74M) to a 2.4x
+larger `small` measurably improved English and Hindi's character-level error,
+but word-level Hindi/Hinglish accuracy stayed catastrophic either way (90%+
+WER both sizes). A `small` that somehow ran in budget would likely still fail
+the accuracy bar — so speeding it up is a weaker bet than it looked before
+`small` was actually scored.
+
 ## What this changes going forward
 
-Per the original plan's M5 decision tree, the live options are:
+Per the original plan's M5 decision tree, the live options, now re-ordered by
+what the `small` scoring actually showed:
 
-1. **Fine-tune**: a Hindi-specific fine-tune (e.g. `vasista22/whisper-hindi-*`
-   lineage) at `base` or `small` size could close much of this gap — that
-   family reports single-digit Hindi WER on clean benchmarks, vastly better
-   than generic multilingual Whisper's ~80-110% seen here. This is the most
-   promising lever given how large the gap is.
-2. **Speed up `small`**: mel-truncation (skip padding to the full 30s window)
-   or NNAPI/GPU offload experiments could plausibly bring `small` under
-   budget — worth testing before ruling it out, since the accuracy upside
-   looked real (Devanagari-committed output vs `base`'s Latin gibberish).
+1. **Fine-tune, now the clear leading option.** A Hindi-specific fine-tune
+   (e.g. `vasista22/whisper-hindi-*` lineage) reports single-digit Hindi WER
+   on clean benchmarks — vastly better than generic multilingual Whisper's
+   ~70-110% seen here at *either* size. Since scaling stock Whisper up didn't
+   meaningfully close the gap, training data quality — not parameter count —
+   looks like the actual bottleneck.
+2. **Speed up `small` — weaker bet than it looked before scoring it.** Even if
+   mel-truncation or NNAPI/GPU offload got `small` under budget, its accuracy
+   is still far short of usable. Worth revisiting only if a fine-tune isn't
+   pursued and `base`'s ~50% CER penalty vs `small` matters enough on its own.
 3. **Dual-model routing**: route by detected language, accepting `base`'s
-   weaker Hindi as a stopgap while 1 or 2 is pursued.
+   weaker Hindi as a stopgap while 1 is pursued.
 4. **Ship `base` as-is for English-dominant use, flag Hindi as beta.** Not
    recommended as a final state, but honest about what's actually usable today.
 
