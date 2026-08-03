@@ -18,6 +18,13 @@ interface AsrEngine : AutoCloseable {
     val id: String
 
     /**
+     * Wall-clock milliseconds spent loading the model, or -1 if not measured.
+     * Cold load runs to seconds for larger models, so it is reported separately
+     * rather than folded into per-utterance latency.
+     */
+    val loadMillis: Long get() = -1L
+
+    /**
      * Run any first-inference work up front (graph allocation, thread pool spin-up,
      * lazy weight paging). Calling this off the critical path keeps the first real
      * utterance from paying a one-off cost the user would read as a stutter.

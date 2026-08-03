@@ -55,6 +55,9 @@ class BenchmarkActivity : AppCompatActivity() {
 
         val base = filesDir
         val modelsDir = File(base, "models").apply { mkdirs() }
+        // GGML weights for the whisper.cpp backend — one .bin per model, vs
+        // the ONNX layout's encoder/decoder/tokens triple per subdirectory.
+        val ggmlDir = File(base, "ggml").apply { mkdirs() }
         val audioDir = File(base, "eval").apply { mkdirs() }
         val outFile = File(base, "benchmark.json")
 
@@ -69,6 +72,7 @@ class BenchmarkActivity : AppCompatActivity() {
                 BenchmarkRunner(
                     modelsDir = modelsDir,
                     audioDir = audioDir,
+                    ggmlDir = ggmlDir,
                     threadCounts = threadCounts,
                     includeFullPrecision = false,
                     outFile = outFile,

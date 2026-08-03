@@ -31,7 +31,7 @@ class SherpaWhisperEngine(
     private var currentLanguage: String = defaultLanguage
 
     /** Time spent constructing the recognizer, i.e. cold model load. */
-    var loadMillis: Long = -1L
+    override var loadMillis: Long = -1L
         private set
 
     init {

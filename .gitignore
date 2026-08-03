@@ -36,3 +36,9 @@ eval/independent_check.json
 # Desktop whisper.cpp scratch (binaries + ggml weights)
 .tmp_whispercpp/
 eval/wcpp_*.jsonl
+
+# Vendored whisper.cpp sources - regenerate with: python tools/setup_whispercpp.py
+android/engine/src/main/cpp/whispercpp/
+
+# Downloaded GGML weights - regenerate with: python tools/fetch_ggml_models.py
+models_ggml/

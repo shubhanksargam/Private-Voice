@@ -22,6 +22,12 @@ import java.io.File
 class BenchmarkRunner(
     private val modelsDir: File,
     private val audioDir: File,
+    /**
+     * Directory of GGML `.bin` weights for the whisper.cpp backend. Separate
+     * from [modelsDir] because the two backends use incompatible layouts: ONNX
+     * needs an encoder/decoder/tokens triple per subdirectory, GGML is one file.
+     */
+    private val ggmlDir: File? = null,
     private val threadCounts: List<Int> = listOf(2, 4),
     private val repeats: Int = 3,
     /** Overrides per-file language detection for every WAV. Leave null for the
@@ -78,34 +84,81 @@ class BenchmarkRunner(
             put("results", results)
         }
 
+        // Build one flat candidate list so both backends sweep identically and
+        // land in the same report, directly comparable.
+        val candidates = mutableListOf<Candidate>()
+
         for (modelDir in modelDirs) {
             for (preferInt8 in precisions) {
                 for (threads in threadCounts) {
                     val spec = ModelSpec.discover(modelDir, threads, preferInt8) ?: continue
                     // discover() falls back to whichever precision exists, so the
                     // int8/full loop can yield the same spec twice. Skip the repeat.
-                    if (results.alreadyHas(spec.id)) continue
-
-                    progress.onLine("── ${spec.id}")
-                    val entry = benchmarkOne(spec, wavs, progress) ?: continue
-                    results.put(entry)
-                    outFile?.writeText(report().toString(2))
+                    if (candidates.any { it.id == spec.id }) continue
+                    candidates += Candidate(
+                        id = spec.id,
+                        backend = "sherpa-onnx",
+                        sizeMB = spec.bytes / 1024 / 1024,
+                        numThreads = threads,
+                    ) { SherpaWhisperEngine(spec, defaultLanguage = languageOverride ?: "en") }
                 }
             }
+        }
+
+        if (ggmlDir != null && ggmlDir.isDirectory) {
+            for (threads in threadCounts) {
+                for (spec in WhisperCppEngine.discover(ggmlDir, threads)) {
+                    if (candidates.any { it.id == spec.id }) continue
+                    candidates += Candidate(
+                        id = spec.id,
+                        backend = "whisper.cpp",
+                        sizeMB = spec.bytes / 1024 / 1024,
+                        numThreads = threads,
+                    ) {
+                        WhisperCppEngine(
+                            modelFile = spec.modelFile,
+                            numThreads = spec.numThreads,
+                            id = spec.id,
+                            defaultLanguage = languageOverride ?: "en",
+                        )
+                    }
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            progress.onLine("No usable models found.")
+        }
+
+        for (c in candidates) {
+            progress.onLine("── ${c.id}  [${c.backend}]")
+            val entry = benchmarkOne(c, wavs, progress) ?: continue
+            results.put(entry)
+            outFile?.writeText(report().toString(2))
         }
 
         return report()
     }
 
-    private fun benchmarkOne(spec: ModelSpec, wavs: List<File>, progress: Progress): JSONObject? {
+    /** One model/backend/thread-count combination to measure. */
+    private class Candidate(
+        val id: String,
+        val backend: String,
+        val sizeMB: Long,
+        val numThreads: Int,
+        val create: () -> AsrEngine,
+    )
+
+    private fun benchmarkOne(c: Candidate, wavs: List<File>, progress: Progress): JSONObject? {
         val engine = try {
-            SherpaWhisperEngine(spec, defaultLanguage = languageOverride ?: "en")
+            c.create()
         } catch (t: Throwable) {
             // A model that fails to load is a data point, not a crash. Record and move on.
-            Log.e(TAG, "Failed to load ${spec.id}", t)
+            Log.e(TAG, "Failed to load ${c.id}", t)
             progress.onLine("   load FAILED: ${t.message}")
             return JSONObject().apply {
-                put("id", spec.id)
+                put("id", c.id)
+                put("backend", c.backend)
                 put("error", t.message ?: t::class.java.simpleName)
             }
         }
@@ -159,10 +212,10 @@ class BenchmarkRunner(
             progress.onLine("   => median ${overall}ms  [$verdict]")
 
             JSONObject().apply {
-                put("id", spec.id)
-                put("encoder", spec.encoder.name)
-                put("numThreads", spec.numThreads)
-                put("sizeMB", spec.bytes / 1024 / 1024)
+                put("id", c.id)
+                put("backend", c.backend)
+                put("numThreads", c.numThreads)
+                put("sizeMB", c.sizeMB)
                 put("loadMillis", engine.loadMillis)
                 put("peakPssMB", Debug.getPss() / 1024)
                 put("medianMillis", overall)
