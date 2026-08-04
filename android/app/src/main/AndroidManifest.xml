@@ -5,9 +5,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!--
-      Belt and braces. If a dependency ever declares network permissions, strip them
-      here; the checkNoInternet Gradle task then verifies the merged result. The app
-      must be structurally incapable of exfiltrating audio, not merely trusted not to.
+      Belt and braces. If a dependency ever declares network permissions, strip
+      them here; the checkNoInternet Gradle task then verifies the merged result.
+      The app must be structurally incapable of exfiltrating audio, not merely
+      trusted not to.
     -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
@@ -19,15 +20,59 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.DayNight.NoActionBar">
 
+        <!-- Setup / launcher. Also the settings screen for both services below. -->
         <activity
-            android:name=".BenchmarkActivity"
+            android:name=".SetupActivity"
             android:exported="true"
-            android:label="@string/benchmark_title">
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The keyboard. BIND_INPUT_METHOD ensures only the system can bind it. -->
+        <service
+            android:name=".VoiceImeService"
+            android:exported="true"
+            android:label="@string/ime_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <!--
+          System speech provider, so HeliBoard's mic key and any SpeechRecognizer
+          caller can use the local engine. Selected under Settings > Voice input.
+        -->
+        <service
+            android:name=".VoiceRecognitionService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.RECORD_AUDIO">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
+
+        <!--
+          M0 measurement harness. Not exported: it is a development tool, not a
+          user-facing surface, but it stays in the build so models can be
+          re-measured on device after any engine or quantization change.
+        -->
+        <activity
+            android:name=".BenchmarkActivity"
+            android:exported="false"
+            android:label="@string/benchmark_title" />
 
     </application>
 

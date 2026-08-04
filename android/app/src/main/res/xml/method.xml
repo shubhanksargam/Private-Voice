@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  IME declaration. Subtypes are declared per language even though only English
+  is enabled for v1 (see docs/M0_RESULTS.md): the plumbing to route a subtype
+  to a language tag is what makes adding Hindi later a model swap rather than a
+  rearchitecture, so it stays in place.
+-->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="dev.privatevoice.app.SetupActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+
+    <subtype
+        android:name="@string/subtype_english"
+        android:imeSubtypeLocale="en_IN"
+        android:imeSubtypeMode="keyboard"
+        android:isAsciiCapable="true"
+        android:imeSubtypeExtraValue="language=en" />
+
+</input-method>

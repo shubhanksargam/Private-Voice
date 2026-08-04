@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares this as a system speech-recognition provider, so HeliBoard's mic key
+  and any app calling SpeechRecognizer can route through the local engine once
+  selected under Settings > Voice input.
+-->
+<recognition-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="dev.privatevoice.app.SetupActivity" />

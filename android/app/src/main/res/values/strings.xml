@@ -1,7 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Private Voice</string>
+    <string name="ime_label">Private Voice</string>
+    <string name="subtype_english">English</string>
+
+    <!-- Keyboard surface. Terse on purpose: this sits under the user's text
+         field and should not compete with it for attention. -->
+    <string name="status_hold_to_talk">Hold to talk</string>
+    <string name="status_listening">Listening</string>
+    <string name="status_transcribing">Transcribing</string>
+
+    <string name="needs_mic_permission">Microphone access needed. Tap to grant.</string>
+    <string name="disabled_for_password">Voice input is off for password fields</string>
+    <string name="no_model_installed">No speech model installed. Open Private Voice to add one.</string>
+    <string name="mic_unavailable">Microphone unavailable</string>
+    <string name="transcription_failed">Could not transcribe that</string>
+
+    <!-- Setup -->
+    <string name="setup_tagline">Speech to text that never leaves your phone.</string>
+    <string name="step_mic">Allow microphone</string>
+    <string name="step_model">Add a speech model</string>
+    <string name="step_enable">Enable the keyboard</string>
+    <string name="setup_ready">Everything is ready.</string>
+    <string name="action_switch_keyboard">Switch keyboard →</string>
+    <string name="installed_models">Installed</string>
+    <string name="importing_model">Copying model…</string>
+    <string name="import_failed">Import failed. Pick a GGML .bin file.</string>
+    <string name="privacy_note">This app has no internet permission. Audio is transcribed on the device and never sent anywhere.</string>
+
+    <!-- M0 benchmark harness; kept for re-measuring after model changes. -->
     <string name="benchmark_title">M0 Benchmark</string>
     <string name="run_benchmark">Run benchmark</string>
-    <string name="benchmark_hint">Push models and audio first:\n\n  python tools/fetch_models.py --push\n\nThen tap Run benchmark.</string>
+    <string name="benchmark_hint">Push models and audio first:\n\n  python tools/fetch_ggml_models.py --push\n\nThen tap Run benchmark.</string>
 </resources>
