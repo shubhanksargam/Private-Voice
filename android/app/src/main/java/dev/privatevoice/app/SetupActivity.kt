@@ -3,6 +3,8 @@ package dev.privatevoice.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -33,6 +35,17 @@ class SetupActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private var importing = false
 
+    // Same restrained near-monochrome palette as VoiceKeyboardView, and the
+    // same reason it's resolved by hand rather than via a theme attr: this
+    // activity is built with zero XML, so there's no theme resource chain to
+    // lean on for correctness — explicit beats implicit here.
+    private val dark: Boolean
+        get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+    private val bg get() = if (dark) Color.parseColor("#0E0E11") else Color.parseColor("#FAFAFA")
+    private val fg get() = if (dark) Color.parseColor("#F2F2F5") else Color.parseColor("#17171A")
+    private val mutedColor get() = if (dark) Color.parseColor("#8A8A93") else Color.parseColor("#6E6E76")
+
     private val requestMic = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { render() }
@@ -48,8 +61,12 @@ class SetupActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             val p = dp(28)
             setPadding(p, dp(56), p, p)
+            setBackgroundColor(bg)
         }
-        setContentView(ScrollView(this).apply { addView(root) })
+        setContentView(ScrollView(this).apply {
+            addView(root)
+            setBackgroundColor(bg)
+        })
     }
 
     override fun onResume() {
@@ -148,7 +165,7 @@ class SetupActivity : AppCompatActivity() {
         TextView(this).apply {
             text = s
             textSize = sizeSp
-            setTextColor(if (muted) 0xFF8A8A93.toInt() else ContextCompat.getColor(this@SetupActivity, android.R.color.primary_text_light))
+            setTextColor(if (muted) mutedColor else fg)
             if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(0, dp(topDp), 0, 0)
             layoutParams = LinearLayout.LayoutParams(
