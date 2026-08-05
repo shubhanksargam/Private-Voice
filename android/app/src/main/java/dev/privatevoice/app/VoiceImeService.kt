@@ -7,23 +7,31 @@ import android.inputmethodservice.InputMethodService
 import android.text.InputType
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import dev.privatevoice.engine.AsrEngineHolder
 import dev.privatevoice.engine.AudioRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The voice keyboard.
+ * The keyboard: a real QWERTY typing surface with a mic key that opens a
+ * hold-to-talk voice view, and an "ABC" key on the voice view to come back.
  *
- * Hold the mic to record, release to transcribe and commit. Deliberately not a
- * full keyboard: it declares no letter keys and is meant to sit alongside a
- * typing keyboard (HeliBoard or similar), which the user switches back to.
+ * Voice is a mode within this one IME, not a separate app the user switches
+ * away to — that's why system-IME switching (for a genuinely different
+ * keyboard) lives on the text surface as a long-press-space, the conventional
+ * place for it, rather than as a dedicated key competing for space here.
  *
  * Everything runs on-device. The app holds no INTERNET permission at all — a
  * Gradle task fails the build if one ever appears in the merged manifest — so
@@ -31,44 +39,207 @@ import kotlinx.coroutines.withContext
  */
 class VoiceImeService : InputMethodService() {
 
+    private enum class Mode { TEXT, VOICE }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val recorder = AudioRecorder()
 
-    private var view: VoiceKeyboardView? = null
+    private var textView: TextKeyboardView? = null
+    private var voiceView: VoiceKeyboardView? = null
+    private var mode = Mode.TEXT
     private var busy = false
 
-    override fun onCreateInputView(): View {
-        val v = VoiceKeyboardView(this)
-        view = v
+    /** Whether the current field wants TYPE_TEXT_FLAG_CAP_SENTENCES honoured. */
+    private var autoCapSentences = false
 
-        v.onHoldStart = { beginRecording() }
-        v.onHoldEnd = { finishRecording() }
-        v.onCancel = { cancelRecording() }
-        v.onSwitchKeyboard = { switchAwayFromSelf() }
-        v.onBackspace = { currentInputConnection?.deleteSurroundingText(1, 0) }
+    override fun onCreateInputView(): View {
+        val tv = TextKeyboardView(this)
+        val vv = VoiceKeyboardView(this)
+        textView = tv
+        voiceView = vv
+
+        tv.onKey = { handleTextKey(it) }
+        tv.onLongPressSpace = { showSystemImePicker() }
+
+        vv.onHoldStart = { beginRecording() }
+        vv.onHoldEnd = { finishRecording() }
+        vv.onCancel = { cancelRecording() }
+        vv.onSwitchToText = { switchToTextMode() }
+        vv.onBackspace = { currentInputConnection?.deleteSurroundingText(1, 0) }
+        vv.visibility = View.GONE
 
         // Warm the model on a background thread as soon as the keyboard is
         // built, so the first press doesn't pay a multi-hundred-ms load.
         scope.launch(Dispatchers.Default) { AsrEngineHolder.getOrLoad(this@VoiceImeService) }
-        return v
+
+        return FrameLayout(this).apply {
+            addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(vv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+            // Apps targeting API 35+ get edge-to-edge by default, and that
+            // applies to IME windows too — without this, the keyboard's own
+            // bottom row draws underneath the 3-button navigation bar instead
+            // of above it. Reading the actual navigationBars() inset (rather
+            // than hardcoding a bar height) is what keeps this correct on
+            // gesture-navigation devices too, where that inset is near zero.
+            ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+                val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+                v.setPadding(0, 0, 0, navBar.bottom)
+                insets
+            }
+        }
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        val v = view ?: return
 
-        when {
-            !hasMicPermission() -> v.showBlocked(getString(R.string.needs_mic_permission))
-            isSensitiveField(info) -> v.showBlocked(getString(R.string.disabled_for_password))
-            !AsrEngineHolder.hasModel(this) -> v.showBlocked(getString(R.string.no_model_installed))
-            else -> v.showIdle()
+        // Always start on the typing surface for a freshly focused field —
+        // voice is opted into per-field, not remembered across them.
+        switchToTextMode()
+        textView?.resetToLetters()
+        configureAutoCap(info)
+
+        val sensitive = isSensitiveField(info)
+        textView?.setMicEnabled(hasMicPermission() && AsrEngineHolder.hasModel(this) && !sensitive)
+
+        // Pre-set the voice view's message so it's correct the instant the
+        // user taps the mic key, rather than flashing idle-then-blocked.
+        voiceView?.let { v ->
+            when {
+                sensitive -> v.showBlocked(getString(R.string.disabled_for_password))
+                !hasMicPermission() -> v.showBlocked(getString(R.string.needs_mic_permission))
+                !AsrEngineHolder.hasModel(this) -> v.showBlocked(getString(R.string.no_model_installed))
+                else -> v.showIdle()
+            }
         }
     }
+
+    // --- typing ---
+
+    private fun handleTextKey(action: TextKeyboardView.KeyAction) {
+        val ic = currentInputConnection
+        when (action) {
+            is TextKeyboardView.KeyAction.Letter -> ic?.commitText(action.char.toString(), 1)
+            is TextKeyboardView.KeyAction.Symbol -> ic?.commitText(action.char.toString(), 1)
+            is TextKeyboardView.KeyAction.Space -> ic?.commitText(" ", 1)
+            is TextKeyboardView.KeyAction.Backspace -> ic?.deleteSurroundingText(1, 0)
+            is TextKeyboardView.KeyAction.Enter -> performEnterAction()
+            is TextKeyboardView.KeyAction.Mic -> switchToVoiceMode()
+            // Shift and the letters/symbols page toggle are fully handled
+            // inside TextKeyboardView — they never reach onKey.
+            is TextKeyboardView.KeyAction.Shift, is TextKeyboardView.KeyAction.SymbolsToggle -> Unit
+        }
+        updateAutoCap()
+    }
+
+    private fun performEnterAction() {
+        val info = currentInputEditorInfo
+        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
+        val multiline = (info?.inputType ?: 0) and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
+        val noEnterAction = (info?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
+        val hasRealAction = action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED
+
+        if (hasRealAction && !multiline && !noEnterAction) {
+            currentInputConnection?.performEditorAction(action)
+        } else {
+            currentInputConnection?.commitText("\n", 1)
+        }
+    }
+
+    private fun configureAutoCap(info: EditorInfo?) {
+        val type = info?.inputType ?: 0
+        autoCapSentences = (type and InputType.TYPE_TEXT_FLAG_CAP_SENTENCES) != 0
+        val capChars = (type and InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS) != 0
+        textView?.setShiftState(
+            when {
+                capChars -> TextKeyboardView.ShiftState.LOCKED
+                autoCapSentences -> TextKeyboardView.ShiftState.ONE_SHOT
+                else -> TextKeyboardView.ShiftState.NONE
+            }
+        )
+    }
+
+    /**
+     * Re-arm shift after a sentence boundary. Runs after every key rather than
+     * only after punctuation, since backspace can undo one too — recomputing
+     * from the actual text beats tracking it incrementally.
+     */
+    private fun updateAutoCap() {
+        val tv = textView ?: return
+        if (!autoCapSentences || tv.shiftLocked) return
+        val before = currentInputConnection?.getTextBeforeCursor(6, 0)?.toString().orEmpty()
+        val trimmed = before.trimEnd(' ')
+        val shouldCap = trimmed.isEmpty() || trimmed.last() in ".!?"
+        tv.setShiftState(if (shouldCap) TextKeyboardView.ShiftState.ONE_SHOT else TextKeyboardView.ShiftState.NONE)
+    }
+
+    private fun showSystemImePicker() {
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+    }
+
+    // --- mode switching ---
+
+    private fun switchToTextMode() {
+        if (recorder.isRecording) recorder.cancel()
+        mode = Mode.TEXT
+        voiceView?.visibility = View.GONE
+        textView?.visibility = View.VISIBLE
+    }
+
+    private fun switchToVoiceMode() {
+        mode = Mode.VOICE
+        textView?.visibility = View.GONE
+        voiceView?.visibility = View.VISIBLE
+    }
+
+    /**
+     * Vocabulary hint keyed off which app owns the focused field.
+     *
+     * [EditorInfo.packageName] is the real, always-available signal for this —
+     * it is not the same thing as reading the host app's screen content, which
+     * Android's IME sandboxing genuinely does not allow. This is a light nudge
+     * on ambiguous audio (near-homophones like "WhatsApp" / "what's up"), not
+     * a hard vocabulary constraint, so a category that guesses wrong just
+     * loses the nudge rather than breaking anything.
+     *
+     * Package matching is a best-effort heuristic, not an exhaustive app
+     * directory — unrecognised or regional apps fall through to no hint.
+     */
+    private fun vocabHintForCurrentField(): String? {
+        val pkg = currentInputEditorInfo?.packageName?.lowercase() ?: return null
+        val info = currentInputEditorInfo
+        val isSearchAction = ((info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION) == EditorInfo.IME_ACTION_SEARCH
+
+        return when {
+            pkg.contains("launcher") ||
+                pkg == "com.google.android.googlequicksearchbox" ||
+                pkg == "com.android.settings" && isSearchAction ->
+                "Common apps: WhatsApp, Instagram, YouTube, Gmail, Chrome, Camera, Photos, Maps, " +
+                    "Amazon, Flipkart, Paytm, PhonePe, Spotify, Netflix, Zoom, Uber, Settings."
+
+            pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("messag") ||
+                pkg.contains("chat") || pkg == "com.facebook.orca" || pkg == "com.instagram.android" ->
+                "Casual chat: hey, okay, sure, thanks, lol, omg, see you, call me, " +
+                    "on my way, sounds good, no worries, WhatsApp, Instagram."
+
+            pkg == "com.android.settings" ->
+                "Phone settings: Wi-Fi, Bluetooth, brightness, notifications, battery, " +
+                    "storage, privacy, permissions, accessibility, display."
+
+            pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") || isSearchAction ->
+                "Web search: search, website, .com, login, sign in, download."
+
+            else -> null
+        }
+    }
+
+    // --- voice (unchanged behaviour from the voice-only build) ---
 
     /**
      * Never dictate into a password or similar. Speaking a credential aloud is
      * the user's business, but silently routing it through a speech engine is
-     * not something a keyboard should do by default.
+     * not something a keyboard should do by default. Typing still works in
+     * these fields — only the mic is withheld.
      */
     private fun isSensitiveField(info: EditorInfo?): Boolean {
         val type = info?.inputType ?: return false
@@ -91,17 +262,17 @@ class VoiceImeService : InputMethodService() {
     private fun beginRecording() {
         if (busy || recorder.isRecording) return
         if (!hasMicPermission()) {
-            view?.showBlocked(getString(R.string.needs_mic_permission))
+            voiceView?.showBlocked(getString(R.string.needs_mic_permission))
             openPermissionScreen()
             return
         }
         try {
             recorder.start()
-            view?.showListening()
+            voiceView?.showListening()
             pumpAmplitude()
         } catch (t: Throwable) {
             Log.e(TAG, "Could not start recording", t)
-            view?.showBlocked(t.message ?: getString(R.string.mic_unavailable))
+            voiceView?.showBlocked(t.message ?: getString(R.string.mic_unavailable))
         }
     }
 
@@ -113,17 +284,17 @@ class VoiceImeService : InputMethodService() {
     private fun pumpAmplitude() {
         scope.launch {
             while (recorder.isRecording) {
-                view?.amplitude = recorder.amplitude
-                kotlinx.coroutines.delay(AMPLITUDE_POLL_MS)
+                voiceView?.amplitude = recorder.amplitude
+                delay(AMPLITUDE_POLL_MS)
             }
-            view?.amplitude = 0f
+            voiceView?.amplitude = 0f
         }
     }
 
     private fun cancelRecording() {
         if (!recorder.isRecording) return
         recorder.cancel()
-        view?.showIdle()
+        voiceView?.showIdle()
     }
 
     private fun finishRecording() {
@@ -133,35 +304,37 @@ class VoiceImeService : InputMethodService() {
         // Ignore taps and stray presses rather than sending a fraction of a
         // second of noise to the model and committing whatever it invents.
         if (samples.size < MIN_SAMPLES) {
-            view?.showIdle()
+            voiceView?.showIdle()
             return
         }
 
         busy = true
-        view?.showTranscribing()
+        voiceView?.showTranscribing()
+        val hint = vocabHintForCurrentField()
 
         scope.launch {
             val text = withContext(Dispatchers.Default) {
                 runCatching {
                     val engine = AsrEngineHolder.getOrLoad(this@VoiceImeService)
                         ?: return@runCatching null
-                    engine.transcribe(samples, AudioRecorder.SAMPLE_RATE, null).text
+                    engine.transcribe(samples, AudioRecorder.SAMPLE_RATE, null, hint).text
                 }.onFailure { Log.e(TAG, "Transcription failed", it) }.getOrNull()
             }
 
             busy = false
             when {
-                text == null -> view?.showBlocked(getString(R.string.transcription_failed))
-                text.isBlank() -> view?.showIdle()
+                text == null -> voiceView?.showBlocked(getString(R.string.transcription_failed))
+                text.isBlank() -> voiceView?.showIdle()
                 else -> {
-                    commit(text)
-                    view?.showIdle()
+                    commitTranscript(text)
+                    voiceView?.showIdle()
+                    updateAutoCap()
                 }
             }
         }
     }
 
-    private fun commit(text: String) {
+    private fun commitTranscript(text: String) {
         val ic = currentInputConnection ?: return
         val existing = ic.getTextBeforeCursor(1, 0)
         // Separate from preceding text, but don't open a field with a space.
@@ -174,15 +347,6 @@ class VoiceImeService : InputMethodService() {
             Intent(this, SetupActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
-    }
-
-    /** Hand back to the user's typing keyboard. */
-    private fun switchAwayFromSelf() {
-        if (!switchToPreviousInputMethod()) {
-            // No previous IME (e.g. this is the only one enabled); fall back to
-            // the system picker rather than trapping the user here.
-            switchToNextInputMethod(false)
-        }
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {

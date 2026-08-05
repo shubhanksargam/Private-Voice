@@ -33,6 +33,9 @@ internal object WhisperLib {
      *   error. This is what stops a degenerate decode from running forever;
      *   a per-segment token cap was tried first and caused a worse failure
      *   (see jni_whisper.c).
+     * @param initialPrompt optional vocabulary hint — text conditioning that
+     *   biases the decoder toward particular words/spellings, not literal
+     *   dictation. Null for none.
      * @return decoded text, or null if the native decode failed outright.
      */
     external fun fullTranscribeToString(
@@ -42,6 +45,7 @@ internal object WhisperLib {
         language: String?,
         translate: Boolean,
         timeoutMs: Int,
+        initialPrompt: String?,
     ): String?
 
     external fun getSystemInfo(): String

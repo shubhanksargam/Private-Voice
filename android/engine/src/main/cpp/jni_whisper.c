@@ -83,7 +83,7 @@ JNIEXPORT jstring JNICALL
 Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
         jfloatArray audio_data, jstring language_str, jboolean translate,
-        jint timeout_ms) {
+        jint timeout_ms, jstring initial_prompt_str) {
     UNUSED(thiz);
     struct whisper_context *context = (struct whisper_context *) context_ptr;
     if (context == NULL) return NULL;
@@ -147,11 +147,25 @@ Java_dev_privatevoice_engine_WhisperLib_fullTranscribeToString(
         params.language = NULL;
     }
 
+    // Vocabulary hint: text conditioning, not literal dictation. Whisper's
+    // language-model prior otherwise favours the common phrase over an
+    // unusual-but-correct proper noun on near-homophones — "WhatsApp" decoded
+    // as "what's up" was the case that motivated this. Standard technique for
+    // this failure mode; see WhisperCppEngine.kt for the actual hint text.
+    const char *initial_prompt = NULL;
+    if (initial_prompt_str != NULL) {
+        initial_prompt = (*env)->GetStringUTFChars(env, initial_prompt_str, NULL);
+        params.initial_prompt = initial_prompt;
+    }
+
     whisper_reset_timings(context);
     const int rc = whisper_full(context, params, audio, n_samples);
 
     if (language != NULL) {
         (*env)->ReleaseStringUTFChars(env, language_str, language);
+    }
+    if (initial_prompt != NULL) {
+        (*env)->ReleaseStringUTFChars(env, initial_prompt_str, initial_prompt);
     }
     (*env)->ReleaseFloatArrayElements(env, audio_data, audio, JNI_ABORT);
 

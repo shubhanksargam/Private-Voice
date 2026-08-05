@@ -35,7 +35,12 @@ class VoiceKeyboardView(context: Context) : View(context) {
     var onHoldStart: (() -> Unit)? = null
     var onHoldEnd: (() -> Unit)? = null
     var onCancel: (() -> Unit)? = null
-    var onSwitchKeyboard: (() -> Unit)? = null
+
+    /** Left utility glyph. Returns to the typing keyboard within this same
+     *  IME — system-IME switching lives on the text keyboard now (long-press
+     *  space), since that's the surface a user reaches for a different app's
+     *  keyboard from, not this one. */
+    var onSwitchToText: (() -> Unit)? = null
     var onBackspace: (() -> Unit)? = null
 
     /** Live mic level, 0..1. Set by the service while recording. */
@@ -251,14 +256,13 @@ class VoiceKeyboardView(context: Context) : View(context) {
         stroke.strokeWidth = dp(1.6f)
         stroke.strokeCap = Paint.Cap.ROUND
 
-        // Globe-ish switch mark: circle with a meridian.
+        // "ABC": text reads unambiguously where an icon (globe? keyboard?)
+        // would need a label anyway — this IS the label.
         val lx = dp(34f)
-        val r = dp(8f)
-        canvas.drawCircle(lx, y, r, stroke)
-        tmpRect.set(lx - r * 0.5f, y - r, lx + r * 0.5f, y + r)
-        canvas.drawArc(tmpRect, 90f, 180f, false, stroke)
-        canvas.drawArc(tmpRect, 270f, 180f, false, stroke)
-        canvas.drawLine(lx - r, y, lx + r, y, stroke)
+        label.color = muted
+        label.textSize = dp(12.5f)
+        label.letterSpacing = 0f
+        canvas.drawText("ABC", lx, y + dp(4f), label)
 
         // Backspace: pentagon outline with an x.
         val rx = width - dp(34f)
@@ -314,7 +318,7 @@ class VoiceKeyboardView(context: Context) : View(context) {
                     return true
                 }
                 if (inUtilityRow(y) && inUtilityRow(downY)) {
-                    if (x < width / 2f) onSwitchKeyboard?.invoke() else onBackspace?.invoke()
+                    if (x < width / 2f) onSwitchToText?.invoke() else onBackspace?.invoke()
                     performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                 }
                 return true

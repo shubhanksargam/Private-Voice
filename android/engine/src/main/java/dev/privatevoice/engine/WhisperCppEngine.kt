@@ -73,13 +73,14 @@ class WhisperCppEngine(
             // degenerate case without being loud enough to decode as speech.
             (((i * 1103515245 + 12345) ushr 16 and 0xFF) - 128) * (0.001f / 128f)
         }
-        transcribe(noise, 16_000, defaultLanguage)
+        transcribe(noise, 16_000, defaultLanguage, promptHint = null)
     }
 
     override fun transcribe(
         samples: FloatArray,
         sampleRate: Int,
         language: String?,
+        promptHint: String?,
     ): AsrResult {
         require(sampleRate == 16_000) {
             "Whisper expects 16kHz; got $sampleRate. Resample before calling."
@@ -96,6 +97,7 @@ class WhisperCppEngine(
                 language = target,
                 translate = false,
                 timeoutMs = DECODE_TIMEOUT_MS,
+                initialPrompt = promptHint,
             ) ?: error("whisper_full failed for $id")
             val elapsed = (System.nanoTime() - started) / 1_000_000
 

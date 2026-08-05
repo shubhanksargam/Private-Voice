@@ -64,14 +64,18 @@ class SherpaWhisperEngine(
         // One pass over half a second of silence. Forces ONNX Runtime to allocate
         // its arenas and spin up worker threads now instead of during the user's
         // first real utterance.
-        transcribe(FloatArray(8_000), 16_000, currentLanguage)
+        transcribe(FloatArray(8_000), 16_000, currentLanguage, promptHint = null)
     }
 
     override fun transcribe(
         samples: FloatArray,
         sampleRate: Int,
         language: String?,
+        promptHint: String?,
     ): AsrResult {
+        // sherpa-onnx's OfflineRecognizer exposes no prompt-conditioning
+        // equivalent; this is a quality nudge, not a correctness requirement,
+        // so silently ignoring it here is correct rather than an oversight.
         val engine = recognizer ?: error("Engine already closed")
         require(sampleRate == 16_000) {
             "Whisper models expect 16kHz; got $sampleRate. Resample before calling."

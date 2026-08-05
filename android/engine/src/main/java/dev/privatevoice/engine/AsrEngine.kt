@@ -39,10 +39,17 @@ interface AsrEngine : AutoCloseable {
      * @param language BCP-47-ish hint ("en", "hi") or null to let the model decide.
      *   Whisper's auto-detect operates on the first 30s window; for short
      *   code-switched utterances an explicit hint is usually more reliable.
+     * @param promptHint optional vocabulary hint — text conditioning that
+     *   biases the decoder toward particular words on ambiguous audio (e.g.
+     *   preferring "WhatsApp" over the near-homophone "what's up"). Backend
+     *   support varies; a backend with no equivalent lever ignores it rather
+     *   than erroring, since this is a quality nudge, not a correctness
+     *   requirement.
      */
     fun transcribe(
         samples: FloatArray,
         sampleRate: Int = 16_000,
         language: String? = null,
+        promptHint: String? = null,
     ): AsrResult
 }
