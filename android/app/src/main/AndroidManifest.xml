@@ -3,6 +3,11 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Optional: feeds contact display names into the vocabulary hint so
+         Indian names are recognised reliably in chat/dialer fields. Never
+         queried unless the user explicitly grants it from setup/settings;
+         names never leave the device, same as everything else. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <!--
       Belt and braces. If a dependency ever declares network permissions, strip
@@ -73,6 +78,15 @@
             android:name=".BenchmarkActivity"
             android:exported="false"
             android:label="@string/benchmark_title" />
+
+        <!-- Reached from SetupActivity and from VoiceImeService (the
+             keyboard's phrasebook page's "Manage" action) — both same-app,
+             so not exported. -->
+        <activity
+            android:name=".PhrasebookActivity"
+            android:exported="false"
+            android:label="@string/phrasebook_title"
+            android:windowSoftInputMode="adjustResize" />
 
     </application>
 

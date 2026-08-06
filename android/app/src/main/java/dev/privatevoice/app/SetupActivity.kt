@@ -3,7 +3,6 @@ package dev.privatevoice.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -39,9 +38,7 @@ class SetupActivity : AppCompatActivity() {
     // same reason it's resolved by hand rather than via a theme attr: this
     // activity is built with zero XML, so there's no theme resource chain to
     // lean on for correctness — explicit beats implicit here.
-    private val dark: Boolean
-        get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
+    private val dark: Boolean get() = KeyboardSettings.isDark(this)
     private val bg get() = if (dark) Color.parseColor("#0E0E11") else Color.parseColor("#FAFAFA")
     private val fg get() = if (dark) Color.parseColor("#F2F2F5") else Color.parseColor("#17171A")
     private val mutedColor get() = if (dark) Color.parseColor("#8A8A93") else Color.parseColor("#6E6E76")
@@ -54,6 +51,12 @@ class SetupActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let { importModel(it) } }
 
+    private val requestContacts = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { render() }
+
+    private lateinit var scroll: ScrollView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -61,12 +64,9 @@ class SetupActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             val p = dp(28)
             setPadding(p, dp(56), p, p)
-            setBackgroundColor(bg)
         }
-        setContentView(ScrollView(this).apply {
-            addView(root)
-            setBackgroundColor(bg)
-        })
+        scroll = ScrollView(this).apply { addView(root) }
+        setContentView(scroll)
     }
 
     override fun onResume() {
@@ -75,6 +75,12 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun render() {
+        // Re-applied every render, not just onCreate: the theme can change
+        // at runtime (the Theme row below toggles it), and onCreate only
+        // runs once — without this the row's label would update but the
+        // screen would stay stuck on whatever theme was active at launch.
+        root.setBackgroundColor(bg)
+        scroll.setBackgroundColor(bg)
         root.removeAllViews()
 
         root.addView(text(getString(R.string.app_name), 30f, bold = true))
@@ -99,6 +105,9 @@ class SetupActivity : AppCompatActivity() {
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showInputMethodPicker()
             })
+            root.addView(button(getString(R.string.action_manage_phrasebook)) {
+                startActivity(Intent(this, PhrasebookActivity::class.java))
+            })
         }
 
         if (modelOk) {
@@ -107,8 +116,88 @@ class SetupActivity : AppCompatActivity() {
             root.addView(text(getString(R.string.installed_models) + "\n" + names, 12f, muted = true, topDp = 28))
         }
 
+        root.addView(text(getString(R.string.settings_section), 13f, muted = true, topDp = 40))
+        root.addView(settingRow(getString(R.string.setting_haptics), onOffLabel(KeyboardSettings.hapticEnabled(this))) {
+            KeyboardSettings.setHapticEnabled(this, !KeyboardSettings.hapticEnabled(this))
+            render()
+        })
+        root.addView(settingRow(getString(R.string.setting_theme), themeLabel(KeyboardSettings.theme(this))) {
+            KeyboardSettings.setTheme(this, nextTheme(KeyboardSettings.theme(this)))
+            render()
+        })
+        root.addView(settingRow(getString(R.string.setting_language), languageLabel(KeyboardSettings.defaultLanguageHint(this))) {
+            KeyboardSettings.setDefaultLanguageHint(this, nextLanguage(KeyboardSettings.defaultLanguageHint(this)))
+            render()
+        })
+        val name = KeyboardSettings.userName(this)
+        root.addView(settingRow(getString(R.string.setting_your_name), name?.takeIf { it.isNotBlank() } ?: getString(R.string.not_set)) {
+            promptForName()
+        })
+        val contactsOk = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+        root.addView(settingRow(getString(R.string.setting_contacts), onOffLabel(contactsOk)) {
+            if (!contactsOk) requestContacts.launch(Manifest.permission.READ_CONTACTS)
+        })
+
         root.addView(text(getString(R.string.privacy_note), 12f, muted = true, topDp = 32))
     }
+
+    private fun onOffLabel(v: Boolean) = getString(if (v) R.string.on else R.string.off)
+
+    private fun themeLabel(t: KeyboardSettings.Theme) = getString(
+        when (t) {
+            KeyboardSettings.Theme.SYSTEM -> R.string.theme_system
+            KeyboardSettings.Theme.LIGHT -> R.string.theme_light
+            KeyboardSettings.Theme.DARK -> R.string.theme_dark
+            KeyboardSettings.Theme.BLACK -> R.string.theme_black
+        }
+    )
+
+    private fun nextTheme(t: KeyboardSettings.Theme) = KeyboardSettings.Theme.entries[
+        (t.ordinal + 1) % KeyboardSettings.Theme.entries.size
+    ]
+
+    private fun languageLabel(h: KeyboardSettings.LanguageHint) = getString(
+        when (h) {
+            KeyboardSettings.LanguageHint.AUTO -> R.string.language_auto
+            KeyboardSettings.LanguageHint.ENGLISH -> R.string.language_english
+            KeyboardSettings.LanguageHint.HINDI -> R.string.language_hindi
+        }
+    )
+
+    private fun nextLanguage(h: KeyboardSettings.LanguageHint) = KeyboardSettings.LanguageHint.entries[
+        (h.ordinal + 1) % KeyboardSettings.LanguageHint.entries.size
+    ]
+
+    private fun promptForName() {
+        val input = android.widget.EditText(this).apply {
+            setText(KeyboardSettings.userName(this@SetupActivity).orEmpty())
+            setTextColor(fg)
+            setHintTextColor(mutedColor)
+            hint = getString(R.string.setting_your_name)
+            setSingleLine()
+        }
+        val pad = dp(20)
+        val container = LinearLayout(this).apply {
+            setPadding(pad, dp(12), pad, 0)
+            addView(input)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.setting_your_name)
+            .setView(container)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                KeyboardSettings.setUserName(this, input.text.toString())
+                render()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Tappable "Title  Value" row — same restrained style as [step], no cards. */
+    private fun settingRow(title: String, value: String, onClick: () -> Unit) =
+        text("$title   ·   $value", 16f, topDp = 18).apply {
+            setOnClickListener { onClick() }
+        }
 
     private fun step(n: Int, title: String, done: Boolean, onClick: () -> Unit) {
         val mark = if (done) "✓" else "$n"

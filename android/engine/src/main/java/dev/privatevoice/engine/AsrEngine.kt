@@ -45,11 +45,53 @@ interface AsrEngine : AutoCloseable {
      *   support varies; a backend with no equivalent lever ignores it rather
      *   than erroring, since this is a quality nudge, not a correctness
      *   requirement.
+     * @param translate if true, ask Whisper's translate task for an English
+     *   rendering of whatever language was spoken, instead of transcribing
+     *   it in its own script/language. Forcing `language="en"` with this
+     *   left false on non-English audio is a mismatched instruction (decode
+     *   as English text when the audio isn't English) and produces garbled
+     *   output, not a translation — pair this with [language]`= null` (let
+     *   the model detect the actual source language) rather than forcing
+     *   "en" alongside it.
      */
     fun transcribe(
         samples: FloatArray,
         sampleRate: Int = 16_000,
         language: String? = null,
         promptHint: String? = null,
+        translate: Boolean = false,
     ): AsrResult
+
+    /**
+     * Cheap language identification — an encoder pass and a single decode
+     * step, not a full transcription. Returns null if unsupported or
+     * detection failed. Used to route AUTO-mode dictation to the right
+     * model/tier without paying a full decode on the wrong one first.
+     * Default is unsupported.
+     */
+    fun detectLanguage(samples: FloatArray, sampleRate: Int = 16_000): LanguageDetection? = null
+
+    /**
+     * Ask an in-flight [transcribe] call to stop early. Safe to call from
+     * any thread — implementations must not route this through whatever
+     * confines their decode work, since that would just queue it behind the
+     * call it's meant to interrupt. Default is a no-op for backends with no
+     * such lever; [transcribe] returning is still guaranteed either way, a
+     * cancel request just isn't guaranteed to make that happen sooner.
+     */
+    fun cancel() {}
 }
+
+/**
+ * Result of [AsrEngine.detectLanguage]. [englishProb]/[hindiProb] are
+ * exposed alongside [topLanguage] specifically so callers can spot
+ * code-switched (Hinglish) audio — whisper's language set has no such
+ * category, so it can only ever report one top language, but a Hindi
+ * probability that's meaningfully non-trivial even when English wins the
+ * top slot is a good proxy for "there's real Hindi content in here too."
+ */
+data class LanguageDetection(
+    val topLanguage: String,
+    val englishProb: Float,
+    val hindiProb: Float,
+)

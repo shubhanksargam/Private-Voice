@@ -6,6 +6,8 @@ material = "1.12.0"
 coroutines = "1.9.0"
 lifecycle = "2.8.7"
 junit = "4.13.2"
+onnxruntime = "1.22.0"
+onnxruntimeExtensions = "0.13.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -14,6 +16,13 @@ material = { group = "com.google.android.material", name = "material", version.r
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+# EN->HI translation only (see EnglishToHindiTranslator) -- unrelated to
+# whisper.cpp/ggml, which stay vendored/native as before. onnxruntime-android
+# is the real ONNX Runtime this time (not sherpa-onnx's vendored .so); the
+# extensions artifact adds the SentencePiece custom op the fused encoder
+# graph needs at inference time.
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+onnxruntime-extensions-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-extensions-android", version.ref = "onnxruntimeExtensions" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

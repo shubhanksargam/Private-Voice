@@ -6,15 +6,24 @@
 
     <!-- Keyboard surface. Terse on purpose: this sits under the user's text
          field and should not compete with it for attention. -->
-    <string name="status_hold_to_talk">Hold to talk</string>
+    <string name="status_tap_to_talk">Tap to talk</string>
     <string name="status_listening">Listening</string>
-    <string name="status_transcribing">Transcribing</string>
+    <string name="status_replacing_selection">Listening — will replace selection</string>
+    <string name="status_recording_phrase">Listening — saving as a new phrase</string>
+    <string name="status_transcribing">Transcribing — tap to cancel</string>
+    <string name="status_battery_saver">battery saver</string>
 
     <string name="needs_mic_permission">Microphone access needed. Tap to grant.</string>
     <string name="disabled_for_password">Voice input is off for password fields</string>
     <string name="no_model_installed">No speech model installed. Open Private Voice to add one.</string>
     <string name="mic_unavailable">Microphone unavailable</string>
     <string name="transcription_failed">Could not transcribe that</string>
+    <string name="tap_to_close">tap to close</string>
+    <string name="undo_done">Removed last dictation</string>
+    <string name="nothing_to_undo">Nothing to undo</string>
+    <string name="privacy_proof_ok">✓ No network permission is declared by this app — it is structurally incapable of sending audio anywhere.</string>
+    <string name="privacy_proof_warning">⚠ This build declares network access — that should not be the case. Please report this.</string>
+    <string name="privacy_proof_permissions">Permissions: %1$s</string>
 
     <!-- Setup -->
     <string name="setup_tagline">Speech to text that never leaves your phone.</string>
@@ -27,6 +36,40 @@
     <string name="importing_model">Copying model…</string>
     <string name="import_failed">Import failed. Pick a GGML .bin file.</string>
     <string name="privacy_note">This app has no internet permission. Audio is transcribed on the device and never sent anywhere.</string>
+
+    <!-- Keyboard settings — reached via long-press ?123/ABC, or from here. -->
+    <string name="settings_section">Keyboard settings</string>
+    <string name="setting_haptics">Key vibration</string>
+    <string name="setting_theme">Theme</string>
+    <string name="setting_language">Default language</string>
+    <string name="language_auto">Auto</string>
+    <string name="language_english">English</string>
+    <string name="language_hindi">Hindi</string>
+    <string name="setting_your_name">Your name</string>
+    <string name="setting_contacts">Recognize contact names</string>
+    <string name="not_set">Not set</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_black">Black</string>
+    <string name="on">On</string>
+    <string name="off">Off</string>
+
+    <!-- Phrasebook management screen -->
+    <string name="phrasebook_title">Phrasebook</string>
+    <string name="phrasebook_tagline">Saved phrases, reusable from either keyboard mode.</string>
+    <string name="phrasebook_add">+ Add phrase</string>
+    <string name="phrasebook_empty">Nothing saved yet.</string>
+    <string name="phrasebook_edit">Edit</string>
+    <string name="phrasebook_copy">Copy</string>
+    <string name="phrasebook_delete">Delete</string>
+    <string name="phrasebook_new_title">New phrase</string>
+    <string name="phrasebook_edit_title">Edit phrase</string>
+    <string name="phrasebook_delete_confirm_title">Delete this phrase?</string>
+    <string name="phrasebook_copied">Copied</string>
+    <string name="phrasebook_saved_selection">Selection saved to phrasebook</string>
+    <string name="phrasebook_select_text_first">Select text first</string>
+    <string name="action_manage_phrasebook">Phrasebook →</string>
 
     <!-- M0 benchmark harness; kept for re-measuring after model changes. -->
     <string name="benchmark_title">M0 Benchmark</string>

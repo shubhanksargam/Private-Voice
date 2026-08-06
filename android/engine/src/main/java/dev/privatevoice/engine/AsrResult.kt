@@ -12,6 +12,16 @@ data class AsrResult(
     val text: String,
     val language: String?,
     val decodeMillis: Long,
+    /**
+     * Raw ASR words the backend itself flagged as low-confidence (see
+     * `WhisperCppEngine` / `jni_whisper.c`'s `fullTranscribeWithConfidence`),
+     * in decode order. Empty for backends with no equivalent signal — this
+     * is a quality nudge for the caller, not a correctness guarantee, and
+     * words here are in whatever script/casing the backend emitted them in
+     * (not necessarily [text]'s final form after any caller-side
+     * post-processing).
+     */
+    val lowConfidenceWords: List<String> = emptyList(),
 ) {
     val isBlank: Boolean get() = text.isBlank()
 }

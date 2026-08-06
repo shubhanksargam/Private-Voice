@@ -1,80 +1,98 @@
 # Private Voice
 
-Fully offline voice typing for Android, targeting Indian English and Hindi.
+Fully offline voice typing and a real typing keyboard for Android, targeting Indian
+English and Hindi/Hinglish (code-switched) speech.
 
-Ships as a standalone voice engine — an `InputMethodService` plus a
-`RecognitionService` — so it works behind HeliBoard's mic key and behind any app
-that uses the standard Android speech API. It is not a keyboard fork.
+Ships as an `InputMethodService` — a complete custom keyboard, not a fork of an
+existing one — plus a system `RecognitionService`, so the same on-device engine also
+answers any app's standard Android speech API (e.g. HeliBoard's mic key). Voice is a
+*mode* inside the keyboard, reached via a mic key, not a separate app.
 
 **Privacy is structural, not promised.** The app declares no `INTERNET` permission,
-and a Gradle task fails the build if one ever appears in the merged manifest. It
-cannot exfiltrate audio even if a dependency tries.
+and a Gradle task fails the build if one ever appears in the merged manifest — even
+one introduced transitively by a dependency. It cannot exfiltrate audio even if it
+tried.
 
 Target device: Samsung Galaxy A35 (Exynos 1380). No accessible NPU, so this is CPU
 inference, and that constraint drives most of the design.
 
 ## Status
 
-**M0 — device feasibility benchmark.** Not yet run: needs an Android SDK and a
-connected phone. See [docs/SETUP.md](docs/SETUP.md).
+**Installed and in daily real use** on the developer's own phone. Bilingual
+Hindi/English dictation works; English↔Hindi translation (in both directions) is
+verified on-device; a full custom typing keyboard (letters, symbols, emoji,
+phrasebook, theming) ships alongside voice, not instead of it.
 
-Everything above M0 is deliberately unbuilt. The project rests on one unknown —
-whether the A35 can run a model that is both accurate enough and fast enough — and
-that question gets a real answer before any UI work happens.
+What's *not* yet verified is at least as important as what is — real human on-device
+testing (not just "compiles and installs cleanly") remains the single highest-value
+next step across both the ASR routing logic and several keyboard UI gestures. See
+**[`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md)** for the full architecture
+writeup and an honest current-state checklist, and **[`docs/STATUS.md`](docs/STATUS.md)**
+/ **[`docs/UI_KEYBOARD_REDESIGN.md`](docs/UI_KEYBOARD_REDESIGN.md)** for the detailed,
+dated engineering log this project is built from — several findings there are
+counter-intuitive and worth reading before touching the corresponding code.
+
+No release build has shipped yet (no Play Store listing, no public GitHub push). See
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for what's outstanding before
+either.
 
 ## Why Whisper
 
 | Option | Verdict |
 |---|---|
-| **Whisper** (tiny/base/small) | ✅ Hindi + English + punctuation + casing in one model |
+| **Whisper** (base/small) | ✅ Hindi + English + punctuation + casing in one model |
 | IndicConformer-600M | ❌ 22 Indian languages but **no English**, and no punctuation |
 | Conformer/CTC + punctuation model | ❌ no Devanagari punctuation-restoration model exists |
 | Streaming Zipformer | ⚠️ fallback only — fast, but unpunctuated |
 
 Whisper is the only single-model option that meets the requirement. The cost is
 latency: it always pads input to a 30-second window, so decode time is roughly
-constant regardless of how long you spoke, and it cannot stream.
+constant regardless of how long you spoke, and it cannot stream. Text lands shortly
+after the mic is released, not while speaking — unlike Google's on-device streaming
+RNN-T, which this project deliberately trades away for accuracy and punctuation.
 
-Google's on-device voice typing uses a streaming RNN-T, which is why its text
-appears as you speak. **We are trading latency for accuracy and punctuation.**
-Expect text shortly after you release the mic, not during.
+The runtime is **whisper.cpp** (GGML), not the ONNX/sherpa-onnx path this project
+started with — sherpa-onnx's byte-level-BPE detokenization silently drops most
+Devanagari characters, which produced a badly wrong initial read on Hindi accuracy.
+Full account in `docs/M0_RESULTS.md`.
 
 ## Honest expectations on Hinglish
 
 Published code-switch WER across ASR models spans **27–70%**, and models degrade
 30–50% relative on code-switched speech versus monolingual. Beating Google on
-Hinglish with off-the-shelf weights is unlikely.
-
-M5 exists to measure that gap against your own voice rather than guess at it, and
-to decide from data whether a fine-tune is warranted.
+Hinglish with off-the-shelf weights is unlikely — measured Hinglish WER on this
+project's own 48-utterance corpus lands inside that published range, not below it. A
+Hindi-specific fine-tune is the leading unexplored lever; see
+`docs/PROJECT_OVERVIEW.md` §5 for the reasoning.
 
 ## Layout
 
 ```
 android/
-  app/      IME, RecognitionService, settings, M0 benchmark harness
-  engine/   AsrEngine abstraction, Whisper backend, VAD, WAV I/O
-tools/
-  setup_sherpa.py   vendor sherpa-onnx native libs + Kotlin API
-  fetch_models.py   download Whisper ONNX weights, adb push
-  bench_device.py   drive M0 on device, tabulate, apply the gate
-  eval_wer.py       Devanagari-aware WER/CER
-eval/
-  audio/    your recordings (gitignored)
-  refs/     reference transcripts (tracked)
+  app/      IME, keyboard UI (typing + voice), RecognitionService, settings,
+            phrasebook, M0 benchmark harness
+  engine/   AsrEngine abstraction, whisper.cpp backend, EN->HI MT engine,
+            transliterators, vendored sherpa-onnx Kotlin API (legacy)
+tools/      setup/model-fetch/benchmark/WER-scoring scripts, ONNX MT pipeline
+            construction/verification scripts
+eval/       48-utterance corpus: audio (gitignored) + Devanagari & Latin refs
+docs/       PROJECT_OVERVIEW.md (read this first), STATUS.md,
+            UI_KEYBOARD_REDESIGN.md, M0_RESULTS.md, SETUP.md, RELEASE_CHECKLIST.md
 ```
 
 ## Quick start
 
 ```powershell
-python tools\setup_sherpa.py
-python tools\fetch_models.py --push
+python tools\setup_whispercpp.py
+python tools\fetch_ggml_models.py --models base,small --quant q8_0
 python tools\bench_device.py
 ```
 
-Full plan: `C:\Users\sarga\.claude\plans\expressive-beaming-backus.md`
+Full toolchain recipe (AGP 9 / built-in Kotlin / `JAVA_HOME` gotchas): `docs/SETUP.md`.
 
 ## Licences
 
-Whisper is MIT. sherpa-onnx is Apache-2.0. IndicConformer is MIT. Verify the licence
-of any fine-tune before shipping it.
+Whisper is MIT. whisper.cpp is MIT. sherpa-onnx is Apache-2.0 (legacy path, not the
+shipping backend). `opus-mt-en-hi` (Helsinki-NLP) is Apache-2.0. IndicConformer is
+MIT (evaluated, not used). Verify the licence of any fine-tune before shipping it.
+This project's own licence is not yet decided — see `docs/RELEASE_CHECKLIST.md`.

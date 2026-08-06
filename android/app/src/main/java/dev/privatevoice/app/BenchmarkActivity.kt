@@ -6,6 +6,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import dev.privatevoice.app.databinding.ActivityBenchmarkBinding
 import dev.privatevoice.engine.BenchmarkRunner
+import dev.privatevoice.engine.TranslationEngineHolder
+import dev.privatevoice.engine.WavIo
+import dev.privatevoice.engine.WhisperCppEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,6 +46,119 @@ class BenchmarkActivity : AppCompatActivity() {
 
         val autoRun = intent?.getBooleanExtra(EXTRA_AUTORUN, false) ?: false
         if (autoRun) startBenchmark()
+
+        val testTranslation = intent?.getBooleanExtra(EXTRA_TEST_TRANSLATION, false) ?: false
+        if (testTranslation) startTranslationSmokeTest()
+
+        val testConfidence = intent?.getBooleanExtra(EXTRA_TEST_CONFIDENCE, false) ?: false
+        if (testConfidence) startConfidenceSmokeTest()
+    }
+
+    /**
+     * Headless smoke test for the new fullTranscribeWithConfidence JNI path
+     * (jni_whisper.c) against real recorded speech (the M0 eval corpus's
+     * WAV files under files/eval/) rather than synthetic audio — this exercises the
+     * actual token-walk/word-grouping C code and the JNI String[] boundary,
+     * which nothing else on-device does yet. Uses `base` directly rather
+     * than going through AsrEngineHolder/VoiceImeService, so a failure here
+     * points straight at the new native code, not at routing logic.
+     */
+    private fun startConfidenceSmokeTest() {
+        binding.runButton.isEnabled = false
+        log.clear()
+        append("Confidence smoke test")
+
+        val modelFile = File(File(filesDir, "ggml"), "ggml-base-q8_0.bin")
+        val wavs = File(filesDir, "eval").listFiles()
+            ?.filter { it.isFile && it.extension.equals("wav", ignoreCase = true) }
+            ?.sortedBy { it.name }
+            ?.take(5)
+            .orEmpty()
+        append("Model: ${modelFile.absolutePath} (exists=${modelFile.isFile})")
+        append("WAVs: ${wavs.size}")
+        append("")
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.Default) {
+                if (!modelFile.isFile || wavs.isEmpty()) {
+                    lifecycleScope.launch { append("FAILED: missing model or eval audio") }
+                    Log.e(TAG, "CONFIDENCE_TEST_COMPLETE FAILED missing-input")
+                    return@withContext
+                }
+                val engine = runCatching { WhisperCppEngine(modelFile) }.getOrElse {
+                    lifecycleScope.launch { append("FAILED to load engine: ${it.message}") }
+                    Log.e(TAG, "CONFIDENCE_TEST_COMPLETE FAILED load", it)
+                    return@withContext
+                }
+                try {
+                    for (wavFile in wavs) {
+                        val wav = runCatching { WavIo.read(wavFile) }
+                        val result = wav.mapCatching { engine.transcribe(it.samples, it.sampleRate) }
+                        val line = result.fold(
+                            onSuccess = { r ->
+                                "${wavFile.name}: \"${r.text}\" lowConf=${r.lowConfidenceWords}"
+                            },
+                            onFailure = { "${wavFile.name}: ERROR ${it.message}" },
+                        )
+                        Log.i(TAG, line)
+                        lifecycleScope.launch { append(line) }
+                    }
+                } finally {
+                    engine.close()
+                }
+            }
+            append("Done.")
+            Log.i(TAG, "CONFIDENCE_TEST_COMPLETE")
+            binding.runButton.isEnabled = true
+        }
+    }
+
+    /**
+     * Headless smoke test for EnglishToHindiTranslator on the real device
+     * Java/JNI stack (custom-op registration, tensor creation, KV-cache
+     * loop) — none of that was exercised by the Python verification this
+     * class was ported from. No mic/audio involved, unlike the full
+     * VoiceImeService path: this drives the MT model directly with fixed
+     * English strings so it's triggerable over adb without real speech.
+     */
+    private fun startTranslationSmokeTest() {
+        binding.runButton.isEnabled = false
+        log.clear()
+        append("Translation smoke test")
+        append("Model present: ${TranslationEngineHolder.hasModel(this)}")
+        append("")
+
+        val samples = listOf(
+            "How are you?",
+            "I am going to the market",
+            "What time is the meeting",
+            "Where is the nearest hospital",
+        )
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.Default) {
+                val translator = TranslationEngineHolder.getOrLoad(this@BenchmarkActivity)
+                if (translator == null) {
+                    lifecycleScope.launch { append("FAILED: could not load translator") }
+                    Log.e(TAG, "TRANSLATION_TEST_COMPLETE FAILED load")
+                    return@withContext
+                }
+                for (s in samples) {
+                    val result = runCatching { translator.translate(s) }
+                    lifecycleScope.launch {
+                        append("EN: $s")
+                        append("HI: ${result.getOrElse { "ERROR: ${it.message}" }}")
+                        append("")
+                    }
+                    Log.i(TAG, "EN: $s -> HI: ${result.getOrElse { "ERROR: ${it.message}" }}")
+                }
+            }
+            append("Done.")
+            // bench_device.py-style marker for a headless `adb shell am start` +
+            // logcat grep drive, matching BENCHMARK_COMPLETE's convention.
+            Log.i(TAG, "TRANSLATION_TEST_COMPLETE")
+            binding.runButton.isEnabled = true
+        }
     }
 
     private fun startBenchmark() {
@@ -103,5 +219,7 @@ class BenchmarkActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "M0Benchmark"
         const val EXTRA_AUTORUN = "autorun"
+        const val EXTRA_TEST_TRANSLATION = "test_translation"
+        const val EXTRA_TEST_CONFIDENCE = "test_confidence"
     }
 }

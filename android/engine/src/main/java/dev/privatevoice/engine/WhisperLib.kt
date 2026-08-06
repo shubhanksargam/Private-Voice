@@ -48,5 +48,42 @@ internal object WhisperLib {
         initialPrompt: String?,
     ): String?
 
+    /**
+     * Same decode as [fullTranscribeToString] — index 0 of the result is
+     * byte-for-byte the same text that call would have returned — plus
+     * per-word confidence flagging: indices 1+ are the raw ASR words
+     * whisper itself was least sure about (see `jni_whisper.c`'s
+     * `WORD_CONFIDENCE_THRESHOLD`), in decode order, duplicates allowed.
+     * Null on the same failure conditions as [fullTranscribeToString].
+     */
+    external fun fullTranscribeWithConfidence(
+        contextPtr: Long,
+        numThreads: Int,
+        audioData: FloatArray,
+        language: String?,
+        translate: Boolean,
+        timeoutMs: Int,
+        initialPrompt: String?,
+    ): Array<String>?
+
     external fun getSystemInfo(): String
+
+    /**
+     * Cheap language identification — one encoder pass + a single decode
+     * step to read language-token logits, not a full transcription.
+     * Returns `[topLanguageCode, englishProb, hindiProb]` as strings (the
+     * probabilities parse as Float), or null on failure.
+     */
+    external fun detectLanguage(contextPtr: Long, numThreads: Int, audioData: FloatArray): Array<String>?
+
+    /**
+     * Ask whichever decode is currently running to stop early. Deliberately
+     * NOT confined the way [fullTranscribeToString] is — this is meant to be
+     * called from a different thread than the one blocked inside that call,
+     * so it must not go through the same single-thread executor or it would
+     * just queue behind the very call it's supposed to interrupt. Sets a
+     * flag whisper.cpp's abort_callback polls during decode; see
+     * jni_whisper.c.
+     */
+    external fun requestCancel()
 }

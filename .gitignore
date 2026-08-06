@@ -42,3 +42,7 @@ android/engine/src/main/cpp/whispercpp/
 
 # Downloaded GGML weights - regenerate with: python tools/fetch_ggml_models.py
 models_ggml/
+
+# EN->HI MarianMT ONNX weights - regenerate with tools/build_onnx_tokenizer3.py
+# + tools/quantize_encoder_with_tokenizer.py (see docs/STATUS.md saga #16-18)
+models_mt/

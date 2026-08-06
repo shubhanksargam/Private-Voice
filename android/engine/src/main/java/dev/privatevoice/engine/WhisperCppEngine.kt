@@ -28,7 +28,12 @@ class WhisperCppEngine(
     private val modelFile: File,
     private val numThreads: Int = 4,
     override val id: String = modelFile.nameWithoutExtension + "-t" + numThreads,
-    private val defaultLanguage: String = "en",
+    // null = auto-detect per utterance. This project ships both English and
+    // Hindi speech from the same field, so forcing a fixed language here was
+    // a real bug: it silently ran every utterance as English regardless of
+    // what was actually said, which reads as "Hindi got translated/garbled
+    // into English" from the user's side rather than as a config mistake.
+    private val defaultLanguage: String? = null,
 ) : AsrEngine {
 
     // Single thread, not a pool: this *is* the thread-safety mechanism, not an
@@ -73,7 +78,7 @@ class WhisperCppEngine(
             // degenerate case without being loud enough to decode as speech.
             (((i * 1103515245 + 12345) ushr 16 and 0xFF) - 128) * (0.001f / 128f)
         }
-        transcribe(noise, 16_000, defaultLanguage, promptHint = null)
+        transcribe(noise, 16_000, defaultLanguage, promptHint = null, translate = false)
     }
 
     override fun transcribe(
@@ -81,21 +86,30 @@ class WhisperCppEngine(
         sampleRate: Int,
         language: String?,
         promptHint: String?,
+        translate: Boolean,
     ): AsrResult {
         require(sampleRate == 16_000) {
             "Whisper expects 16kHz; got $sampleRate. Resample before calling."
         }
-        val target = language ?: defaultLanguage
+        // Only fall back to defaultLanguage when translate is off — a
+        // translate request wants to detect whatever language was actually
+        // spoken, not get pinned to this engine's configured default.
+        val target = if (translate) language else (language ?: defaultLanguage)
 
         return onWorker {
             check(contextPtr != 0L) { "Engine already closed" }
             val started = System.nanoTime()
-            val text = WhisperLib.fullTranscribeToString(
+            // fullTranscribeWithConfidence's index 0 is byte-for-byte the
+            // same text fullTranscribeToString would return for identical
+            // input (see jni_whisper.c) — this is a strict superset, not a
+            // behaviour change, so every existing caller that only reads
+            // .text is unaffected.
+            val decoded = WhisperLib.fullTranscribeWithConfidence(
                 contextPtr = contextPtr,
                 numThreads = numThreads,
                 audioData = samples,
                 language = target,
-                translate = false,
+                translate = translate,
                 timeoutMs = DECODE_TIMEOUT_MS,
                 initialPrompt = promptHint,
             ) ?: error("whisper_full failed for $id")
@@ -104,8 +118,37 @@ class WhisperCppEngine(
             // whisper.cpp prefixes segments with a space; harmless for WER but
             // it would show up as a stray leading space when committed to a
             // text field.
-            AsrResult(text = text.trim(), language = target, decodeMillis = elapsed)
+            AsrResult(
+                text = decoded[0].trim(),
+                language = target,
+                decodeMillis = elapsed,
+                lowConfidenceWords = decoded.drop(1),
+            )
         }
+    }
+
+    override fun detectLanguage(samples: FloatArray, sampleRate: Int): LanguageDetection? {
+        require(sampleRate == 16_000) {
+            "Whisper expects 16kHz; got $sampleRate. Resample before calling."
+        }
+        return onWorker {
+            check(contextPtr != 0L) { "Engine already closed" }
+            val result = WhisperLib.detectLanguage(contextPtr, numThreads, samples) ?: return@onWorker null
+            val (topLanguage, enProbStr, hiProbStr) = result
+            LanguageDetection(
+                topLanguage = topLanguage,
+                englishProb = enProbStr.toFloatOrNull() ?: 0f,
+                hindiProb = hiProbStr.toFloatOrNull() ?: 0f,
+            )
+        }
+    }
+
+    override fun cancel() {
+        // Deliberately NOT routed through onWorker — that executor is
+        // confined to one thread, and the decode this is meant to interrupt
+        // is already blocking that thread. Queuing behind it would mean the
+        // cancel request only runs after the thing it's cancelling is done.
+        WhisperLib.requestCancel()
     }
 
     override fun close() {
