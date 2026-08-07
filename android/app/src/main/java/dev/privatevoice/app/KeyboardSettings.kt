@@ -33,6 +33,7 @@ object KeyboardSettings {
 
     private const val PREFS = "privatevoice_prefs"
     private const val KEY_HAPTIC = "haptic_enabled"
+    private const val KEY_SOUND = "sound_enabled"
     private const val KEY_THEME = "theme_override"
     private const val KEY_USER_NAME = "user_name"
     private const val KEY_DEVANAGARI_MODE = "devanagari_mode"
@@ -47,6 +48,19 @@ object KeyboardSettings {
 
     fun setHapticEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_HAPTIC, enabled).apply()
+    }
+
+    /**
+     * Governs every synthesized sound effect this app plays — the mic's
+     * start/accept chimes, Enter, and each key tap (see
+     * `VoiceImeService.playPcm`) — one switch, same as [hapticEnabled]
+     * covers every vibration rather than each gesture having its own.
+     */
+    fun soundEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SOUND, true)
+
+    fun setSoundEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SOUND, enabled).apply()
     }
 
     /**
@@ -127,4 +141,35 @@ object KeyboardSettings {
 
     /** True only for the pure-black AMOLED variant of dark mode ([Theme.BLACK]) — SYSTEM never resolves to it, since the OS has no equivalent signal to opt into. */
     fun isPureBlack(context: Context): Boolean = theme(context) == Theme.BLACK
+
+    /**
+     * The live evidence behind the "fully offline" claim: the permissions
+     * this app has genuinely declared, read from [android.content.pm.PackageManager]
+     * rather than restating a claim from a settings screen — a real runtime
+     * check, not copy. Shared by both keyboard surfaces' lock glyph
+     * ([VoiceKeyboardView]'s privacy-info overlay, [TextKeyboardView]'s
+     * lock key), so there is exactly one place this logic can drift from
+     * what the build actually ships.
+     */
+    fun privacyProofText(context: Context): String {
+        val pm = context.packageManager
+        val info = pm.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+        val declared = info.requestedPermissions?.toList().orEmpty()
+        val networkPerms = listOf(
+            android.Manifest.permission.INTERNET,
+            android.Manifest.permission.ACCESS_NETWORK_STATE,
+            android.Manifest.permission.ACCESS_WIFI_STATE,
+        )
+        val hasNetwork = declared.any { it in networkPerms }
+        val names = declared.map { it.substringAfterLast('.') }
+        return buildString {
+            if (hasNetwork) {
+                append(context.getString(R.string.privacy_proof_warning))
+            } else {
+                append(context.getString(R.string.privacy_proof_ok))
+            }
+            append(" ")
+            append(context.getString(R.string.privacy_proof_permissions, names.joinToString(", ").ifEmpty { "none" }))
+        }
+    }
 }

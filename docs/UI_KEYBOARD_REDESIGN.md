@@ -14,6 +14,19 @@ or either panel's utility row — several of these went through 3-4 rounds of
 behavior is *not* what a first read of the code's git history would suggest
 if you stopped partway through.
 
+**A third session (2026-08-07) added a further round of work on top of
+everything below**: a shared hand-drawn vector icon set replacing every raw
+emoji glyph on both panels, a from-scratch synthesized sound-effect system
+(key taps, Enter, recording-start/accept/failure chimes, with a settings
+toggle), a new in-app how-to-use guide screen, unified lock-icon behavior
+across both panels, "return to the panel you came from" navigation memory,
+voice mode as the keyboard's default landing panel, and further bottom-row/
+utility-row reorders. **Fully documented in "Session update — 2026-08-07"
+below** — read it before touching icon drawing, the sound-effect code in
+`VoiceImeService`, or either panel's utility/bottom row layout, since the
+layouts described in "Current design" further down predate it in a few
+places (flagged inline where they do).
+
 ## Current design (end state — read this section if you just need "what does
 it do now", not the history)
 
@@ -213,17 +226,24 @@ keyboard, no long-press behavior at all.
 
 ### Voice panel utility row layout
 
-Now 5-way (`width / 5f`), left to right: **ABC | B | ☺ | ↺ (undo) | ⌫
-(backspace)**. Was 3-way (ABC | undo | backspace) at the start of this
+**Superseded — see "Session update — 2026-08-07" below for the current
+7-way layout (ABC | B | ↺ | ☺ | ⌫ | ? | ⏎).** As of this (earlier) session it
+was 5-way (`width / 5f`), left to right: **ABC | B | ☺ | ↺ (undo) | ⌫
+(backspace)**. Was 3-way (ABC | undo | backspace) at the very start of this
 session; B and ☺ were added as new dedicated buttons partway through,
 mirroring the text keyboard's B/emoji keys instead of relying on
 mic-long-press tricks (see "Superseded/rejected designs" below for what was
-tried and abandoned before landing here).
+tried and abandoned before landing here). The later session added a Guide
+("?") key and an Enter key to this row, changing it from 5-way to 7-way and
+moving ↺/☺ to a new order — described below, not here.
 
 ### Text keyboard bottom row layout
 
-Current order: **?123 | 🎤 | B | ☺ | Space | . | , | ⏎**. Notable moves this
-session, each a separate explicit user request:
+**Superseded — see "Session update — 2026-08-07" below for the current
+order (?123 | 🔒 | 🎤 | ☺ | Space | B | . | , | ⏎), which added the lock key
+to this row and moved B from before Space to after it.** As of this (earlier)
+session the order was: **?123 | 🎤 | B | ☺ | Space | . | , | ⏎**. Notable
+moves in *this* session, each a separate explicit user request:
 - Mic moved to right after `?123` (was further right, near the middle).
 - Comma moved twice: first to just left of Space, then finally to just right
   of the period (its current position). If asked to move it again, the
@@ -398,8 +418,12 @@ since span-preservation behavior on `commitText` genuinely varies by app):
 8. **Symbols page 2**: `?123` → `=\<` → confirm the new brackets/currency/math
    page renders and its own `?123` returns to page 1, and `ABC` from either
    symbols page returns straight to letters.
-9. **Layout**: confirm the bottom row reads `?123 | 🎤 | B | ☺ | Space | . |
-   , | ⏎` and the voice panel utility row reads `ABC | B | ☺ | ↺ | ⌫`.
+9. **Layout**: **superseded** — the bottom row and utility row layouts
+   described here predate the 2026-08-07 session's changes (added the lock
+   key to the bottom row, grew the utility row from 5-way to 7-way). See
+   "Session update — 2026-08-07"'s "Current layouts" section for the
+   layouts to actually verify, and that section's "Verification status" for
+   what's still outstanding there.
 
 None of the ASR/translation "Do this next" items from `docs/STATUS.md` have
 been touched or affected by this session's work — that list is still
@@ -424,3 +448,265 @@ separately open.
 All of the above compiled clean (`:app:compileDebugKotlin`) and were
 installed (`:app:installDebug`) on the connected SM-A356E test device as of
 the end of this session.
+
+---
+
+## Session update — 2026-08-07: icons, sound design, guide screen, panel memory
+
+A third session, on top of everything above. Five separate pieces of work,
+each iterated multiple rounds against real on-device feedback (this session
+did install-and-test on the connected device throughout, not just
+compile-verification — see each subsection for what was actually confirmed
+by ear/eye vs. what's still only compile-verified).
+
+### 1. Shared vector icon set (`KeyboardIcons.kt`, new file)
+
+Every raw emoji glyph either panel used to draw as text (🎤, ☺, 🔒, plus the
+hand-drawn backspace/arrow shapes each panel drew separately) is now a
+shared, hand-drawn `Canvas` vector in one object, `KeyboardIcons`. Rationale:
+emoji render inconsistently across devices/font sets and read as a mismatched
+style against the rest of the keyboard's flat monochrome icon language.
+Zero-allocation by convention (same as the rest of both views) — every
+function takes the caller's own scratch `Path`/`RectF`/`Paint` fields rather
+than owning any state.
+
+- **`drawMic`** — soft rounded capsule + curved cradle + stem. Used only for
+  `VoiceKeyboardView`'s large central mic button (kept soft/rounded per
+  explicit approval: "the mic icon in the voice panel was great").
+- **`drawMicAngular`** — same idea but with a curved dome top and sharp,
+  straight-edged body/stand below, for `TextKeyboardView`'s small
+  utility-row mic — matches that row's other flat-edged glyphs (backspace,
+  lock) instead of reusing the soft voice-panel shape.
+- **`drawEmoji`** — a closed book with a tiny smiley on the cover, replacing
+  the plain "☺". The book shape reflects the *other* half of what this key
+  does (long-press → phrasebook) rather than being a face with no visual tie
+  to that gesture.
+- **`drawArrow`** — a shaft + open chevron head, rotatable via `angleDeg`
+  (`Canvas.rotate` convention). One shape shared by `TextKeyboardView`'s
+  Shift/Caps key (rotated to point up) and both panels' Enter key (pointing
+  right).
+- **`drawBackspace`** — the classic arrow-shaped-outline-with-an-"×"-inside
+  glyph, replacing two separately hand-drawn pentagon-and-lines versions
+  (one per panel) with one shared shape. Both the outline and the cross are
+  drawn in the same single `color` (not two-tone) — an explicit late
+  correction ("The red and white in the backspace should be of same color as
+  bold b").
+- **`drawLock`** — shackle arc + body + a dim keyhole dot, replacing "🔒" on
+  both panels' privacy-info glyph.
+
+**Colors, after several rounds of "try X, revert, try Y" feedback (final
+state only — see git history if the intermediate attempts matter)**:
+`VoiceKeyboardView`'s central mic is blue (`micAccent`, `#0A84FF`) — was red
+originally, changed on explicit request ("The mic icon in voice panel should
+have blue instead of red waves and mic bg"). Both panels' Enter key is solid
+green. Caps/Shift's arrow is blue when capitals are active, otherwise muted
+(matching B's "no color change unless meaningfully stateful" convention) —
+**never** the accent-blue overlap that a naive "just recolor the whole
+glyph" version produced; getting this right took a dedicated correction
+("the caps arrow should not show the blue overlap in the arrow and should
+replicate the enter key style"). The emoji/book glyph is orange. Backspace
+and Shift's *muted* state both resolve to the same B-matching muted tone, not
+independently chosen colors, so a future palette change to B's muted color
+automatically keeps these in sync. The transcribing-arc spinner on the mic
+(drawn separately in `VoiceKeyboardView`, not part of `KeyboardIcons`) was
+also recolored blue during this pass, to match the mic itself, from an
+earlier red.
+
+**A late fit-and-finish request** ("Ensure that all the icons in the bottom
+of the voice panel follow a straight line at their respective centers")
+found that the utility row's glyphs were being vertically centered by
+several different, slightly inconsistent methods per glyph. Fixed by having
+every glyph in `drawUtilityGlyphs()` share one `centerY` and use real font
+metrics (`Paint.FontMetrics`, `-(ascent+descent)/2` baseline offset) for the
+text-drawn glyphs, so text and vector glyphs land on the exact same visual
+center line rather than each being eyeballed separately.
+
+### 2. Sound design system (`VoiceImeService.kt`)
+
+A from-scratch synthesized sound-effect layer — no sample assets, no
+external audio library, just Kotlin math (`sin`, phase accumulation for
+click-free frequency glides, one-pole lowpass filtering, squared-attack /
+exponential-decay envelopes) rendered once into cached `ShortArray` PCM
+buffers (`by lazy`, computed once per process) and played via
+`android.media.AudioTrack` (`MODE_STATIC`, `AudioAttributes.USAGE_
+ASSISTANCE_SONIFICATION` / `CONTENT_TYPE_SONIFICATION`).
+
+**What plays, and when:**
+- **`playStartChime()`** — a short (190ms) tone, fires right as recording
+  starts (`beginRecording()`).
+- **`playKeyTick()`** — a very short (30ms), quiet tone on every letter/
+  symbol/space/backspace tap on the text keyboard (`handleTextKey()`).
+- **`playEnterChime()`** — fires from `performEnterAction()`, shared by both
+  panels' Enter keys.
+- **`playAcceptChime()`** — a longer (2.5s), fading "arrival" tone on a
+  *successful* transcription landing in the field.
+- **`playFailureChime()`** — a shorter, descending-pitch variant, fires when
+  a transcription attempt fails (`outcome == null` branch of
+  `finishRecording()`).
+
+All five share one underlying synthesis primitive, `cinematicSwellPcm()` — a
+small detuned unison "trio" (frequency ratios `[1.0, 0.994, 1.006]`) plus a
+sub-octave layer and a quiet overtone, mixed at different per-layer
+amplitudes, with a squared (not linear) attack for a soft onset and either a
+linear or exponential release depending on the specific chime — the shared
+building block behind what the user asked for as a "Hans Zimmer" — deep,
+layered, detuned, swelling — sound identity rather than a flat single-tone
+beep (`ToneGenerator`, tried first, was explicitly rejected as sounding like
+a DTMF dial tone). The accept chime (`genieAppearPcm()`) is a distinct,
+longer variant of the same idea — layered detuned tones with pitch held flat
+through the attack and only rising during the fade, tuned over several
+rounds of "too loud," "should be a fade not a burst," "remove the swoosh,"
+"remove the sparkle" feedback down to *just* the layered tone itself, no
+noise/percussive elements at all in the final version despite several being
+tried and removed (see "Design iteration notes" below).
+
+**One switch controls all of it**: `KeyboardSettings.soundEnabled()` /
+`setSoundEnabled()`, a new "Key sound" row in `SetupActivity`, mirroring how
+`hapticEnabled` already covers every vibration. `playPcm()` checks it first
+and no-ops entirely if off — no chimes are computed *or* played when
+disabled (the `by lazy` PCM buffers still get computed once on first access,
+but `AudioTrack` playback itself is skipped).
+
+**A real bug found and fixed**: recording immediately after the start chime
+played was intermittently transcribed as a hallucinated "bell" — the
+chime's own playback was leaking into the mic input. Fixed with
+`CHIME_TRIM_MS = 300`: `finishRecording()` now trims the leading 300ms of
+raw samples (`rawSamples.copyOfRange(trimSamples, rawSamples.size)`) before
+the minimum-length check and before handing audio to the ASR engine, so the
+chime's own tail never reaches the model. **Confirmed fixed** — user
+explicitly reported the fix worked ("THe tests at the previous step look
+good").
+
+**A second real bug, unrelated to audio content**: the deep bass tones used
+in early iterations (fundamentals in the 78–99Hz range) were essentially
+inaudible on the test device's phone speaker, which rolls off steeply below
+roughly 150–200Hz. Fixed by shifting every fundamental up an octave (into
+the 130–220Hz range) — not a code bug, a physical-speaker-response gotcha
+worth remembering before tuning any future low-frequency sound on this
+class of hardware.
+
+**Design iteration notes** (what was tried and walked back, so it isn't
+reintroduced by accident): a wind-noise "swoosh" layer (filtered white
+noise) was added to the accept chime, then explicitly removed ("Remove the
+swoosh from the genie appearing sound"); a short plucked/arpeggiated
+"Zimmer guitar" element (Karplus-Strong delay-line synthesis) was tried and
+fully removed, code and all; a percussive "sparkle" layer was added then
+also explicitly removed ("Remove the sparkle sound"). The final accept
+chime is the plain layered-tone swell alone — resist the urge to add texture
+back in without being asked again, each addition was tried once and
+rejected once already.
+
+**How this was verified without being able to hear it directly**: since
+sound quality can't be judged by reading code, every round of feedback here
+was install → user listens on-device → report back → adjust — roughly 15
+rounds total across the whole arc from "add a slight sound effect" through
+the final tuned version. The one sound that couldn't be triggered by normal
+use (`playFailureChime()` — genuine ASR failures aren't reproducible on
+demand) got a **temporary, clearly-marked debug hook**: a long-press
+gesture on the voice panel's "?" (help) key that called `playFailureChime()`
+directly instead of opening the guide, built, installed, confirmed by the
+user ("This looks cool"), then **fully removed again** — the `downAtMs`
+field, the long-press branch, the `onDebugTestFailureSound` callback, and
+its wiring in `VoiceImeService` are all gone; "?" is back to plain-tap-only.
+If a similarly hard-to-trigger sound needs testing again in the future, this
+same pattern (temporary debug hook on an existing key, confirm by ear,
+delete completely) is the one already validated for this codebase — don't
+leave a debug hook in place "just in case."
+
+### 3. How-to-use guide screen (`GuideActivity.kt`, new file)
+
+A single scrollable, zero-XML guide screen (same programmatic-views style as
+`SetupActivity`/`PhrasebookActivity`) covering getting-started, voice
+dictation, the B key, emoji/phrasebook, the typing keyboard, tips, and
+privacy — written to surface the gestures a first-time user would never
+discover by tapping around (double-tap-B, long-press-emoji, undo). Reachable
+two ways: a "How to use →" row in `SetupActivity`, and a dedicated "?" key
+in the voice panel's utility row (`onOpenGuide`).
+
+### 4. Lock/privacy behavior unified across both panels
+
+Previously the two panels' privacy-info affordances didn't match: the text
+keyboard reached settings via a long-press on `?123`, while the voice panel's
+lock glyph opened the privacy-info toast directly on tap. Both now behave
+identically: **tap the lock glyph → open Settings; long-press it → show the
+privacy-info toast** (`KeyboardSettings.privacyProofText()`, the live
+`PackageManager`-permissions readout, moved into `KeyboardSettings` so both
+panels share the exact same logic rather than each computing it separately).
+The old long-press-`?123`-for-settings gesture is gone.
+
+### 5. Panel-return memory, and voice mode as the default landing panel
+
+**Voice mode is now the keyboard's default landing state** (`VoiceImeService`'s
+`mode` field defaults to `Mode.VOICE`, and `resetToLetters()`/field-change
+handling route back to voice, not letters, on a genuinely new field) — a
+deliberate flip from the previous default of landing on the typing keyboard.
+
+**Navigating to Settings, the Guide, the emoji panel, or the phrasebook from
+either panel now returns to *that same panel* afterward**, rather than
+always landing back on text/letters regardless of where the user actually
+came from. Implemented via `VoiceImeService.modeBeforeDetour: Mode?` — set
+to `Mode.VOICE` right before switching away for one of these detours (e.g.
+inside `vv.onOpenPhrasebook`/`vv.onOpenEmojiPanel`), and read/cleared inside
+`TextKeyboardView.onExitOverlayPage` (a new callback fired when an
+in-keyboard overlay page like emoji or phrasebook is closed) to decide
+whether to switch back to voice mode or stay on text. In-keyboard overlay
+pages (emoji grid, phrasebook page) now show a vector back-chevron
+(`KeyboardIcons.drawArrow(..., 180f)`, bottom-left) instead of a "←" text
+glyph, matching the rest of this session's icon-language shift; real
+`Activity` screens (`SetupActivity`, `GuideActivity`, `PhrasebookActivity`)
+each got an explicit plain-text "←" back affordance instead, since they have
+no in-keyboard overlay concept to mirror.
+
+### Current layouts (superseding the two sections earlier in this file)
+
+- **Voice panel utility row**, 7-way (`width / 7f`): **ABC | B | ↺ (undo) |
+  ☺ (emoji/phrasebook) | ⌫ (backspace) | ? (guide) | ⏎ (Enter, green)**. Grew
+  from the previous 5-way row (ABC/B/☺/↺/⌫) by adding the Guide key and an
+  Enter key, and reordering ↺/☺ (undo now comes right after B, emoji moved
+  right of undo — the earlier "switch the location of notebook and undo"
+  requests, applied more than once across this and the prior session, so
+  don't assume the previous doc's 5-way order still holds).
+- **Text keyboard bottom row**: **?123 | 🔒 (lock/settings) | 🎤 (mic) | ☺
+  (emoji) | Space | B (bold) | . | , | ⏎ (Enter)** — added the lock key to
+  this row (previously only reachable via long-press-`?123`, now also its
+  own explicit key) and moved B from before Space to after it.
+
+### Verification status for this session's work
+
+Compiled clean and installed on the connected test device after every
+change, same as prior sessions. Beyond that baseline:
+- **Confirmed by the user, on-device**: the bold selection fix (carried over
+  from the prior session, re-verified still working), the failure chime's
+  sound (via the temporary debug hook, since removed).
+- **Not independently re-confirmed by ear per individual chime** beyond the
+  overall "This looks cool" — the accept/start/enter/key-tick chimes were
+  each iterated against real listening feedback during their respective
+  design rounds (see "Design iteration notes" above), but there was no
+  single final pass explicitly re-confirming all five chimes together after
+  the very last round of tuning.
+- **Not yet human-tap-verified**: the new 7-way utility row's hit-target
+  boundaries (particularly Guide vs. Enter, the two newest columns), the
+  panel-return-memory behavior across all four detour paths (Settings,
+  Guide, emoji, phrasebook) from both starting panels, and the lock key's
+  tap-vs-long-press split on the *text* keyboard specifically (the voice
+  panel's version of this was already working before this session; the text
+  keyboard's is new this session).
+
+## Files touched this session (2026-08-07)
+
+| File | What changed |
+|---|---|
+| `app/src/main/java/dev/privatevoice/app/KeyboardIcons.kt` | New file — shared vector icon set (mic ×2 variants, emoji/book, arrow, backspace, lock) |
+| `app/src/main/java/dev/privatevoice/app/GuideActivity.kt` | New file — how-to-use guide screen |
+| `app/src/main/java/dev/privatevoice/app/VoiceImeService.kt` | Sound-design system (`cinematicSwellPcm`/`genieAppearPcm`, `playPcm`, five chime call sites), `CHIME_TRIM_MS` mic-bleed fix, `modeBeforeDetour`/panel-return memory, `openGuideScreen()`, voice-mode-as-default, lock tap/long-press wiring |
+| `app/src/main/java/dev/privatevoice/app/TextKeyboardView.kt` | Icon-based rendering for backspace/Enter/Shift/Mic/EmojiToggle/PrivacyInfo (was text/emoji), lock key added to bottom row + tap/long-press split, `onExitOverlayPage` callback, vector back-chevron on overlay pages, bottom-row reorder (B moved after Space) |
+| `app/src/main/java/dev/privatevoice/app/VoiceKeyboardView.kt` | Utility row grew 5-way → 7-way (added Guide "?" and Enter), icon-based mic/backspace/emoji/Enter rendering, mic recolored blue, shared `centerY`/font-metrics alignment across the row, lock tap/long-press swapped to match text keyboard |
+| `app/src/main/java/dev/privatevoice/app/KeyboardSettings.kt` | Added `soundEnabled()`/`setSoundEnabled()`; `privacyProofText()` moved here from `VoiceKeyboardView` so both panels share one implementation |
+| `app/src/main/java/dev/privatevoice/app/SetupActivity.kt` | Added "Key sound" settings row, back arrow, "How to use →" button |
+| `app/src/main/java/dev/privatevoice/app/PhrasebookActivity.kt` | Added back arrow |
+| `app/src/main/res/values/strings.xml` | `setting_sound`, `guide_title`, `guide_tagline`, `action_open_guide`, related strings |
+| `app/src/main/AndroidManifest.xml` | Added `GuideActivity` entry (`exported="false"`) |
+
+All of the above compiled clean and were installed on the connected test
+device; the failure chime and the bold-selection fix were confirmed by the
+user directly, the rest per the verification status above.

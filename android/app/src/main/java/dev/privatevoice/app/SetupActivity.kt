@@ -83,6 +83,7 @@ class SetupActivity : AppCompatActivity() {
         scroll.setBackgroundColor(bg)
         root.removeAllViews()
 
+        root.addView(backArrow())
         root.addView(text(getString(R.string.app_name), 30f, bold = true))
         root.addView(text(getString(R.string.setup_tagline), 14f, muted = true, topDp = 8))
 
@@ -108,6 +109,9 @@ class SetupActivity : AppCompatActivity() {
             root.addView(button(getString(R.string.action_manage_phrasebook)) {
                 startActivity(Intent(this, PhrasebookActivity::class.java))
             })
+            root.addView(button(getString(R.string.action_open_guide)) {
+                startActivity(Intent(this, GuideActivity::class.java))
+            })
         }
 
         if (modelOk) {
@@ -119,6 +123,10 @@ class SetupActivity : AppCompatActivity() {
         root.addView(text(getString(R.string.settings_section), 13f, muted = true, topDp = 40))
         root.addView(settingRow(getString(R.string.setting_haptics), onOffLabel(KeyboardSettings.hapticEnabled(this))) {
             KeyboardSettings.setHapticEnabled(this, !KeyboardSettings.hapticEnabled(this))
+            render()
+        })
+        root.addView(settingRow(getString(R.string.setting_sound), onOffLabel(KeyboardSettings.soundEnabled(this))) {
+            KeyboardSettings.setSoundEnabled(this, !KeyboardSettings.soundEnabled(this))
             render()
         })
         root.addView(settingRow(getString(R.string.setting_theme), themeLabel(KeyboardSettings.theme(this))) {
@@ -267,6 +275,19 @@ class SetupActivity : AppCompatActivity() {
         text(s, 16f, topDp = 20).apply {
             setTextColor(0xFFFF453A.toInt())
             setOnClickListener { onClick() }
+        }
+
+    /**
+     * Explicit back affordance — this screen has no action bar, so without
+     * this the only way out is the system back gesture. Same 16sp as the
+     * rest of this screen's rows/buttons (see [step]/[settingRow]/[button])
+     * rather than a larger icon-sized glyph, so it reads as part of the
+     * same text hierarchy, not an oversized outlier.
+     */
+    private fun backArrow(): View =
+        text("←", 16f).apply {
+            setPadding(0, 0, 0, dp(4))
+            setOnClickListener { finish() }
         }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

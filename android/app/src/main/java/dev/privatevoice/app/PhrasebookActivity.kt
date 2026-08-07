@@ -59,6 +59,7 @@ class PhrasebookActivity : AppCompatActivity() {
         scroll.setBackgroundColor(bg)
         root.removeAllViews()
 
+        root.addView(backArrow())
         root.addView(text(getString(R.string.phrasebook_title), 26f, bold = true))
         root.addView(text(getString(R.string.phrasebook_tagline), 13f, muted = true, topDp = 6))
         root.addView(button(getString(R.string.phrasebook_add)) { promptAdd() })
@@ -171,6 +172,17 @@ class PhrasebookActivity : AppCompatActivity() {
         text(s, 16f, topDp = 20).apply {
             setTextColor(accent)
             setOnClickListener { onClick() }
+        }
+
+    /**
+     * Explicit back affordance — this screen has no action bar, so without
+     * this the only way out is the system back gesture. Same 16sp as the
+     * rest of this screen's rows/buttons rather than a larger icon-sized glyph.
+     */
+    private fun backArrow(): View =
+        text("←", 16f).apply {
+            setPadding(0, 0, 0, dp(4))
+            setOnClickListener { finish() }
         }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

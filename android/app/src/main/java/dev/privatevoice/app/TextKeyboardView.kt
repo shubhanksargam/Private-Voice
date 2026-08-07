@@ -60,6 +60,8 @@ class TextKeyboardView(context: Context) : View(context) {
         object BoldToggle : KeyAction()
         /** "=\<" / "?123" toggle between the two symbol pages — fully handled inside this view, never reaches [onKey]. */
         object MoreSymbols : KeyAction()
+        /** Lock glyph — mirrors the voice panel's privacy-proof key; the service shows the live permissions readout. */
+        object PrivacyInfo : KeyAction()
     }
 
     private data class Key(val action: KeyAction, val label: String, val flex: Float = 1f, val accent: Boolean = false)
@@ -68,8 +70,8 @@ class TextKeyboardView(context: Context) : View(context) {
     var onKey: ((KeyAction) -> Unit)? = null
     var onLongPressSpace: (() -> Unit)? = null
 
-    /** Long-press ?123/ABC — this keyboard's settings entry point. */
-    var onLongPressSettings: (() -> Unit)? = null
+    /** Long-press the lock glyph — shows the privacy info readout; a plain tap on the same key opens Settings instead (dispatched via [KeyAction.PrivacyInfo]/[onKey]). Matches VoiceKeyboardView's lock exactly. */
+    var onLongPressPrivacyInfo: (() -> Unit)? = null
 
     /**
      * Fires after a confirmed single tap of "B" has already toggled
@@ -92,6 +94,18 @@ class TextKeyboardView(context: Context) : View(context) {
      * double-tap handler ever got a chance to read it.
      */
     var onDoubleTapBoldSave: (() -> Boolean)? = null
+
+    /**
+     * Fired when the emoji or phrasebook page's "back" control is tapped —
+     * distinct from just closing symbols, since emoji/phrasebook are the
+     * two pages reachable from the *voice* panel too (see
+     * [dev.privatevoice.app.VoiceKeyboardView.onOpenEmojiPanel]/[dev.privatevoice.app.VoiceKeyboardView.onOpenPhrasebook]).
+     * If the service opened one of them as a detour from voice mode, it
+     * switches back to voice here instead of leaving the user stranded on
+     * the letters keyboard they never asked to see. Not fired when closing
+     * the plain symbols page, which only the text keyboard itself can open.
+     */
+    var onExitOverlayPage: (() -> Unit)? = null
 
     private var shiftState = ShiftState.NONE
     private var showSymbols = false
@@ -140,6 +154,8 @@ class TextKeyboardView(context: Context) : View(context) {
     // "on," and keeps the two meanings visually distinct.
     private val accent = Color.parseColor("#FF453A")
     private val enterAccent = Color.parseColor("#34C759")
+    private val capsAccent = Color.parseColor("#0A84FF")
+    private val bookAccent = Color.parseColor("#FF9F0A")
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -148,6 +164,9 @@ class TextKeyboardView(context: Context) : View(context) {
         typeface = KeyboardPalette.typeface
     }
     private val bgPath = Path()
+    // Scratch RectF reused by KeyboardIcons' vector glyphs (mic, emoji) —
+    // zero-allocation like every other scratch field on this view.
+    private val tmpRect = RectF()
     // Always-bold rendering of the "B" glyph itself, regardless of toggle
     // state — the icon reads as "this is the bold button" unambiguously;
     // active/inactive is signalled by colour (same red-for-"on" convention
@@ -307,14 +326,15 @@ class TextKeyboardView(context: Context) : View(context) {
 
     private fun bottomRow(togglePageLabel: String) = listOf(
         Key(KeyAction.SymbolsToggle, togglePageLabel, 1.1f),
-        Key(KeyAction.Mic, "🎤", 0.7f),
+        Key(KeyAction.PrivacyInfo, "🔒", 0.7f),
+        Key(KeyAction.Mic, "🎤", 0.7f, accent = true),
+        Key(KeyAction.EmojiToggle, "☺", 0.7f),
+        Key(KeyAction.Space, "", 3.0f),
         // Bold typeface on the label itself (see drawKey) is the only
         // active-state indicator — no accent fill, which would otherwise
         // paint the key red like Shift/Enter do for a state that isn't
         // actually urgent or exclusive.
         Key(KeyAction.BoldToggle, "B", 0.7f),
-        Key(KeyAction.EmojiToggle, "☺", 0.7f),
-        Key(KeyAction.Space, "", 3.0f),
         Key(KeyAction.Symbol('.'), ".", 0.7f),
         Key(KeyAction.Symbol(','), ",", 0.7f),
         Key(KeyAction.Enter, "⏎", 1.3f, accent = true),
@@ -444,11 +464,15 @@ class TextKeyboardView(context: Context) : View(context) {
     }
 
     private fun drawEmojiFooter(canvas: Canvas, top: Float, footerH: Float) {
-        label.color = muted
-        label.textSize = dp(13f)
-        label.letterSpacing = 0f
-        val metrics = label.fontMetrics
-        canvas.drawText("ABC", width / 2f, top + footerH / 2f - (metrics.ascent + metrics.descent) / 2, label)
+        // Vector arrow (KeyboardIcons), not text "←" — same drawing style
+        // as Enter/Backspace, muted colour (same as B, which never changes
+        // colour by state either — this control's meaning doesn't change
+        // by state, just what it returns to). Bottom-left, not centred —
+        // out of the way of the grid above it, same corner a system back
+        // button would occupy. This page can be reached from the voice
+        // panel too (see onExitOverlayPage), so "back" doesn't always mean
+        // "go to letters" — a generic arrow is accurate either way.
+        KeyboardIcons.drawArrow(canvas, dp(28f), top + footerH / 2f, dp(21f), muted, 255, stroke, bgPath, 180f)
     }
 
     /**
@@ -502,6 +526,7 @@ class TextKeyboardView(context: Context) : View(context) {
                             haptic()
                             showEmoji = false
                             rebuildRows()
+                            onExitOverlayPage?.invoke()
                         }
                         else -> {
                             val cell = emojiCell()
@@ -624,11 +649,10 @@ class TextKeyboardView(context: Context) : View(context) {
     }
 
     private fun drawPhraseFooter(canvas: Canvas, top: Float, footerH: Float) {
-        label.color = muted
-        label.textSize = dp(13f)
-        label.letterSpacing = 0f
-        val metrics = label.fontMetrics
-        canvas.drawText("ABC", width / 2f, top + footerH / 2f - (metrics.ascent + metrics.descent) / 2, label)
+        // Same vector arrow, same position/colour as drawEmojiFooter — see
+        // there for why. This page is reachable from the voice panel too,
+        // so exiting doesn't always mean "letters".
+        KeyboardIcons.drawArrow(canvas, dp(28f), top + footerH / 2f, dp(21f), muted, 255, stroke, bgPath, 180f)
     }
 
     /** Manual ellipsis — Canvas.drawText doesn't wrap or truncate on its own. */
@@ -678,6 +702,7 @@ class TextKeyboardView(context: Context) : View(context) {
                             haptic()
                             showPhrases = false
                             rebuildRows()
+                            onExitOverlayPage?.invoke()
                         }
                         else -> {
                             val rowH = phraseRowHeight()
@@ -722,19 +747,34 @@ class TextKeyboardView(context: Context) : View(context) {
         val disabled = key.action is KeyAction.Mic && !micEnabled
 
         val isEnter = key.action == KeyAction.Enter
-        val keyAccent = if (isEnter) enterAccent else accent
+        val isShift = key.action is KeyAction.Shift
+        val isMic = key.action is KeyAction.Mic
+        val keyAccent = if (isEnter) enterAccent else if (isMic) capsAccent else accent
 
         if (pressed && !disabled) {
-            fill.color = if (key.accent) keyAccent else keyPressedBg
+            // Shift never gets the accent fill, active or not — its arrow is
+            // a fixed colour like B (see label.color below), so a coloured
+            // press background behind it would be the same clashing-colour
+            // problem fixed earlier, just moved rather than solved. It gets
+            // the same neutral keyPressedBg any plain key gets.
+            fill.color = if (key.accent && !isShift) keyAccent else keyPressedBg
             fill.alpha = if (key.accent) 255 else 255
             val inset = dp(3f)
             canvas.drawRoundRect(
                 rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset,
                 dp(8f), dp(8f), fill,
             )
-        } else if (key.accent && isEnter) {
-            // Enter stays a quiet accent outline at rest, filled only when pressed —
-            // color marks "this key is different" without shouting on an idle keyboard.
+        } else if (key.accent && isEnter && !disabled) {
+            // Enter stays a quiet accent outline at rest, filled only when
+            // pressed — color marks "this key is different" without
+            // shouting on an idle keyboard. Mic deliberately isn't here: an
+            // always-on tinted background read as a visual bug, not a
+            // signal ("the mic icon in the keyboard has a light blue bg,
+            // remove that") — it now has no background at rest, matching
+            // the other plain utility keys, and still gets the normal
+            // keyAccent-colored press flash via the branch above. Shift
+            // deliberately isn't here either — see the pressed-fill branch
+            // above for why.
             fill.color = keyAccent
             fill.alpha = 28
             val inset = dp(3f)
@@ -759,15 +799,25 @@ class TextKeyboardView(context: Context) : View(context) {
 
         label.color = when {
             disabled -> muted
-            key.action is KeyAction.Shift && key.accent -> accent
+            // Muted (same as B) only while letters are lowercase. The
+            // moment shift is armed or locked — key.accent, i.e. the next
+            // or current letters are capital — the arrow switches to fg
+            // (not a hardcoded white) so it reads correctly as "capitals
+            // are on" in every theme: white in dark/black mode, dark in
+            // light mode. Pressed forces the same fg regardless, for
+            // immediate tap feedback before the state itself updates. The
+            // caps-lock dot below is a separate signal on top of this —
+            // one-shot vs. locked, not lowercase vs. capital.
+            isShift -> if (pressed || key.accent) fg else muted
             key.accent -> if (pressed) Color.WHITE else keyAccent
             // Static colour, same as the other utility glyphs — B's
             // function depends entirely on the current selection (bold vs
             // un-bold) or the toggle for text typed/dictated afterward,
             // neither of which a fixed key colour could represent
             // meaningfully anyway. Matches VoiceKeyboardView's B exactly.
-            key.action is KeyAction.SymbolsToggle || key.action is KeyAction.Mic || key.action is KeyAction.EmojiToggle
+            key.action is KeyAction.SymbolsToggle || key.action is KeyAction.EmojiToggle
                 || key.action is KeyAction.MoreSymbols || key.action == KeyAction.BoldToggle
+                || key.action is KeyAction.PrivacyInfo
             -> muted
             else -> fg
         }
@@ -777,6 +827,78 @@ class TextKeyboardView(context: Context) : View(context) {
             else -> dp(19.5f)
         }
         label.alpha = if (disabled) 120 else 255
+
+        // Mic, emoji-toggle, privacy-lock, and caps/shift draw as hand-built
+        // vector glyphs, not text — see KeyboardIcons for why (emoji-character
+        // glyphs render inconsistently across devices and don't match the
+        // keyboard's own flat monochrome icon language).
+        when (key.action) {
+            is KeyAction.Mic -> {
+                KeyboardIcons.drawMicAngular(
+                    canvas, rect.centerX(), rect.centerY(), dp(21f),
+                    label.color, label.alpha, fill, stroke, bgPath, tmpRect,
+                )
+                return
+            }
+            is KeyAction.EmojiToggle -> {
+                KeyboardIcons.drawEmoji(
+                    canvas, rect.centerX(), rect.centerY(), dp(21f),
+                    bookAccent, label.alpha, stroke, fill, tmpRect,
+                )
+                return
+            }
+            is KeyAction.PrivacyInfo -> {
+                KeyboardIcons.drawLock(
+                    canvas, rect.centerX(), rect.centerY(), dp(19f),
+                    label.color, label.alpha, fill, stroke, tmpRect,
+                )
+                return
+            }
+            is KeyAction.Shift -> {
+                // label.color already resolves the right shade (muted at
+                // rest, same as B; fg — theme-adaptive, not a hardcoded
+                // white — when pressed) via the isShift branch above.
+                // Locked (caps lock) adds a small dot underneath in the
+                // same colour; a plain one-shot shift doesn't, since it
+                // reverts after one letter.
+                KeyboardIcons.drawArrow(
+                    canvas, rect.centerX(), rect.centerY(), dp(21f),
+                    label.color, label.alpha, stroke, bgPath, -90f,
+                )
+                if (shiftState == ShiftState.LOCKED) {
+                    fill.color = label.color
+                    fill.alpha = label.alpha
+                    canvas.drawCircle(rect.centerX(), rect.centerY() + dp(13f), dp(2f), fill)
+                }
+                return
+            }
+            is KeyAction.Enter -> {
+                // Same shape as the voice panel's Enter key — see
+                // KeyboardIcons.drawArrow. label.color turns white when
+                // pressed (see Shift above for why that matters — green
+                // stayed green-on-green here before this fix, same
+                // low-contrast bug).
+                KeyboardIcons.drawArrow(
+                    canvas, rect.centerX(), rect.centerY(), dp(22f),
+                    label.color, label.alpha, stroke, bgPath, 0f,
+                )
+                return
+            }
+            is KeyAction.Backspace -> {
+                // Arrow-shaped outline + cross, muted — same fixed colour
+                // as B — replaces the plain "⌫" text glyph (font-dependent
+                // rendering, same inconsistency problem the other
+                // KeyboardIcons replacements solved) and matches the voice
+                // panel's backspace, now the same icon there too.
+                KeyboardIcons.drawBackspace(
+                    canvas, rect.centerX(), rect.centerY(), dp(22f),
+                    muted, label.alpha, stroke, bgPath,
+                )
+                return
+            }
+            else -> Unit
+        }
+
         // Always bold, active or not — that's B's natural glyph, not a
         // state indicator; only the colour above (muted/fg) shows the
         // toggle state. Mirrors VoiceKeyboardView's B exactly.
@@ -814,7 +936,7 @@ class TextKeyboardView(context: Context) : View(context) {
                         spaceLongPressed = false
                         armLongPressSpace()
                     }
-                    is KeyAction.SymbolsToggle -> {
+                    is KeyAction.PrivacyInfo -> {
                         settingsLongPressed = false
                         armLongPressSettings()
                     }
@@ -837,7 +959,7 @@ class TextKeyboardView(context: Context) : View(context) {
                 when (action) {
                     is KeyAction.Backspace -> Unit // already handled on DOWN + repeat
                     is KeyAction.Space -> if (!spaceLongPressed) onSpaceTapped()
-                    is KeyAction.SymbolsToggle -> if (!settingsLongPressed) commit(action)
+                    is KeyAction.PrivacyInfo -> if (!settingsLongPressed) commit(action)
                     is KeyAction.EmojiToggle -> if (!emojiLongPressed) commit(action)
                     // Double-tap-aware — see onBoldTapped.
                     is KeyAction.BoldToggle -> onBoldTapped()
@@ -865,15 +987,20 @@ class TextKeyboardView(context: Context) : View(context) {
         when (action) {
             is KeyAction.Shift -> onShiftTapped()
             is KeyAction.SymbolsToggle -> {
-                // "?123" (from letters) opens the symbols page; "ABC" (shown
-                // on the symbols, emoji, and phrasebook pages) always
-                // returns straight to letters, regardless of which alt page
-                // it was tapped from.
+                // "?123" (from letters) opens the symbols page; "ABC"/"←"
+                // (shown on the symbols, emoji, and phrasebook pages)
+                // always returns straight to letters, regardless of which
+                // alt page it was tapped from — except emoji/phrasebook can
+                // also have been opened as a detour from the voice panel,
+                // in which case onExitOverlayPage below sends the service
+                // back to voice mode instead of leaving letters showing.
                 if (showSymbols || showEmoji || showPhrases) {
+                    val wasOverlayPage = showEmoji || showPhrases
                     showSymbols = false
                     symbolsPage = 1
                     showEmoji = false
                     showPhrases = false
+                    if (wasOverlayPage) onExitOverlayPage?.invoke()
                 } else {
                     showSymbols = true
                 }
@@ -975,7 +1102,7 @@ class TextKeyboardView(context: Context) : View(context) {
         cancelLongPressSettings()
         val r = Runnable {
             settingsLongPressed = true
-            onLongPressSettings?.invoke()
+            onLongPressPrivacyInfo?.invoke()
         }
         longPressSettingsRunnable = r
         handler.postDelayed(r, LONG_PRESS_MS)
@@ -997,6 +1124,15 @@ class TextKeyboardView(context: Context) : View(context) {
             showEmoji = false
             showSymbols = false
             showPhrases = true
+            // This switches page mid-gesture, within the same view (no
+            // window/focus change, so ACTION_CANCEL never fires to clear
+            // press state the normal way) — without this, the emoji key's
+            // pressed highlight stayed baked into the letters grid
+            // (pressedRow/pressedCol pointed at a cell that never got a
+            // matching ACTION_UP) and reappeared stuck "pressed" the next
+            // time the grid was drawn, e.g. after returning from the
+            // phrasebook page.
+            clearPress()
             rebuildRows()
         }
         longPressEmojiRunnable = r

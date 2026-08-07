@@ -1,6 +1,6 @@
 # Private Voice — Project Overview
 
-*A synthesized analysis of the codebase as of 2026-08-06. This document
+*A synthesized analysis of the codebase as of 2026-08-07. This document
 consolidates `README.md`, `docs/STATUS.md`, `docs/UI_KEYBOARD_REDESIGN.md`,
 and `docs/M0_RESULTS.md` into one reference. Those files remain the
 authoritative session-by-session history; this is the "read this first"
@@ -91,12 +91,14 @@ models/, models_ggml/, models_mt/   Downloaded/converted model weights (gitignor
 
 | File | Role |
 |---|---|
-| `VoiceImeService.kt` (1,278 lines) | The `InputMethodService`. Owns recording state machine, language/tier routing, bold/undo/phrasebook/confidence logic, `InputConnection` interaction. |
-| `TextKeyboardView.kt` (1,080 lines) | Full custom-drawn typing keyboard: letters, two symbols pages, emoji grid, phrasebook page, transliteration suggestion strip. |
-| `VoiceKeyboardView.kt` (873 lines) | Voice-first panel: mic, language/script toggles, 5-way utility row (ABC/B/☺/undo/backspace). |
-| `KeyboardPalette.kt` / `KeyboardSettings.kt` | Theming (Light / Dark / Black-AMOLED) and persisted `SharedPreferences` settings. |
+| `VoiceImeService.kt` | The `InputMethodService`. Owns recording state machine, language/tier routing, bold/undo/phrasebook/confidence logic, `InputConnection` interaction, the synthesized sound-effect system, and panel-return navigation memory. |
+| `TextKeyboardView.kt` | Full custom-drawn typing keyboard: letters, two symbols pages, emoji grid, phrasebook page, transliteration suggestion strip, lock/settings key. |
+| `VoiceKeyboardView.kt` | Voice-first panel (now the keyboard's default landing mode): mic, language/script toggles, 7-way utility row (ABC/B/undo/emoji/backspace/guide/Enter). |
+| `KeyboardIcons.kt` | Shared hand-drawn vector icon set (mic ×2 variants, emoji/book, arrow, backspace, lock) used by both panels in place of raw emoji glyphs. |
+| `GuideActivity.kt` | How-to-use guide screen, reachable from Settings and a dedicated key on the voice panel. |
+| `KeyboardPalette.kt` / `KeyboardSettings.kt` | Theming (Light / Dark / Black-AMOLED) and persisted `SharedPreferences` settings, including the sound-effects on/off toggle. |
 | `PhrasebookStore.kt` / `PhrasebookActivity.kt` | Text-only (never audio) saved-phrase store + CRUD screen. |
-| `SetupActivity.kt` | Launcher / settings screen (theme, default language, contacts opt-in, phrasebook entry point). |
+| `SetupActivity.kt` | Launcher / settings screen (theme, default language, contacts opt-in, sound toggle, phrasebook + guide entry points). |
 | `BenchmarkActivity.kt` | M0 harness UI, not exported — a dev tool kept in the shipping build so models can be re-measured after engine changes. |
 | `VoiceRecognitionService.kt` | System `RecognitionService` implementation, so third-party apps can call the same engine via the standard Android speech API. |
 | `EmojiData.kt` | ~800 emoji across 9 categories. |
@@ -293,8 +295,10 @@ double-tap version) opens the phrasebook.
 - **Battery/thermal-aware fallback**: low battery (not charging) or elevated
   thermal state forces any `small`-tier routing decision down to `base` for
   that utterance.
-- **On-keyboard privacy proof** ("🔒"): live `PackageManager` permission
-  read, not static copy.
+- **On-keyboard privacy proof** (lock icon): live `PackageManager` permission
+  read, not static copy. Identical on both panels: **tap → Settings,
+  long-press → the permissions readout** (unified this session; the two
+  panels previously used different gestures for this).
 - **Per-word confidence underlining**: a *separate* native export
   (`fullTranscribeWithConfidence`, deliberately not a refactor of the
   existing transcribe path, to keep it isolated) flags words whose minimum
@@ -303,6 +307,42 @@ double-tap version) opens the phrasebook.
   unchanged (English/Latin) — transliteration/loanword-correction/MT paths
   rewrite the text enough that flagged words can't be re-matched, so those
   paths silently get no markup rather than wrong markup.
+
+### Vector icon set, sound design, guide screen (2026-08-07 session)
+
+- **Shared vector icons** (`KeyboardIcons.kt`) replace every raw emoji glyph
+  (mic, emoji/book, lock, backspace) with a hand-drawn `Canvas` shape in one
+  consistent stroke language, shared by both panels. Colors settled after
+  several rounds of feedback: mic is blue, Enter is green, the emoji/book
+  glyph is orange, Shift/Caps' arrow is blue only when capitals are active
+  (muted otherwise, matching B's convention of not color-coding every
+  state).
+- **Synthesized sound-effect system** (`VoiceImeService`) — no audio assets,
+  purely Kotlin-synthesized `AudioTrack` PCM: a start chime on recording
+  begin, a quiet tick on each typed key, a chime on Enter, a longer fading
+  "arrival" chime on successful transcription, and a distinct descending
+  chime on failure. One settings toggle (`KeyboardSettings.soundEnabled`)
+  disables all of it. Two real bugs found and fixed building this: the start
+  chime's own playback was leaking into the mic and getting hallucinated as
+  speech (fixed by trimming the first 300ms of every recording before it
+  reaches the ASR engine), and early low-frequency tones were inaudible on
+  the test device's phone speaker (fixed by shifting fundamentals up an
+  octave — the speaker rolls off below ~150-200Hz).
+- **How-to-use guide** (`GuideActivity`) — a single scrollable screen
+  covering gestures a first-time user wouldn't discover by tapping around
+  (double-tap-B, long-press-emoji, undo), reachable from Settings and a
+  dedicated key on the voice panel.
+- **Panel-return navigation memory** — visiting Settings, the guide, the
+  emoji panel, or the phrasebook from either panel now returns to that same
+  panel afterward, instead of always landing back on the typing keyboard.
+  **Voice mode is now the keyboard's default landing panel** on a fresh
+  field (was the typing keyboard before this session).
+- **Current row layouts**: voice panel utility row (7-way) is
+  **ABC | B | ↺ | ☺ | ⌫ | ? | ⏎**; text keyboard bottom row is
+  **?123 | 🔒 | 🎤 | ☺ | Space | B | . | , | ⏎**. Full detail, including what
+  changed from the previous session's layouts and what's still only
+  compile-verified vs. confirmed on-device, in
+  `docs/UI_KEYBOARD_REDESIGN.md`'s "Session update — 2026-08-07" section.
 
 ### Explicitly rejected/superseded designs (do not reintroduce without being asked)
 Documented in detail in `docs/UI_KEYBOARD_REDESIGN.md`: mic-long-press for
@@ -392,6 +432,17 @@ on-device; the dual-tier routing pipeline is live.
 7. No fine-tune has been trained; the project's own M0 analysis identifies
    fine-tuning as the strongest remaining lever for real Hindi/Hinglish
    accuracy, still unactioned.
+8. **The 2026-08-07 icon/sound/guide-screen session** (see
+   `docs/UI_KEYBOARD_REDESIGN.md`'s "Session update — 2026-08-07") installed
+   and iterated against real on-device feedback throughout — unlike item 4
+   above, most of it *was* checked by the user directly (all five chimes
+   went through real listening-feedback rounds; the failure chime and the
+   bold-selection fix were explicitly confirmed working). Still open: the
+   new 7-way voice-panel utility row's hit-target boundaries around the two
+   newest columns (Guide, Enter), the panel-return-memory behavior across
+   all four detour paths from both starting panels, and the text keyboard's
+   new lock-key tap/long-press split specifically (the voice panel's
+   version of this gesture was already working before this session).
 
 **Milestone status** (per the original plan,
 `C:\Users\sarga\.claude\plans\expressive-beaming-backus.md`): M0 (device

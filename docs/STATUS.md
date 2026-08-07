@@ -14,9 +14,13 @@ actually rendered bold; a backspace-repeat runaway bug; an undo/tap-to-record
 touch-target collision). **That work is fully documented separately in
 [`docs/UI_KEYBOARD_REDESIGN.md`](UI_KEYBOARD_REDESIGN.md) — read it before
 touching any keyboard UI code (the B key, emoji key, phrasebook, or either
-panel's utility row especially).** Nothing below this point in the current
-file was touched by that session; the ASR/translation pipeline it describes
-is unaffected and still accurate.
+panel's utility row especially).** A further session on 2026-08-07 added a
+shared vector icon set, a synthesized sound-effect system, a how-to-use guide
+screen, unified lock-key behavior, and panel-return navigation memory —
+documented in that same file's "Session update — 2026-08-07" section.
+Nothing below this point in the current file was touched by either UI
+session; the ASR/translation pipeline it describes is unaffected and still
+accurate.
 
 ## One-line state
 

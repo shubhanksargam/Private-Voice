@@ -102,8 +102,14 @@ class VoiceKeyboardView(context: Context) : View(context) {
      */
     var onOpenPhrasebook: (() -> Unit)? = null
 
-    /** Long-pressing the privacy glyph opens full settings — a normal tap still shows the privacy info panel. Settings needs a real entry point from voice mode too, not just the text keyboard's long-press-?123. */
+    /** Tapping the privacy glyph opens full settings; long-pressing it shows the privacy info panel instead. Same mapping as TextKeyboardView's lock key, exactly. */
     var onOpenSettings: (() -> Unit)? = null
+
+    /** "?" in the utility row — opens [GuideActivity], the how-to-use guide. Plain tap, no long-press behaviour. */
+    var onOpenGuide: (() -> Unit)? = null
+
+    /** Green arrow in the utility row — same action as [TextKeyboardView]'s Enter key. Plain tap, no long-press behaviour. */
+    var onEnter: (() -> Unit)? = null
 
     /**
      * Fires on every tap of "B" — toggles bold for subsequently
@@ -162,6 +168,9 @@ class VoiceKeyboardView(context: Context) : View(context) {
     private val muted get() = KeyboardPalette.muted(dark, black)
     private val ring get() = KeyboardPalette.ring(dark, black)
     private val accent get() = Color.parseColor("#FF453A")
+    private val enterAccent get() = Color.parseColor("#34C759")
+    private val micAccent get() = Color.parseColor("#0A84FF")
+    private val bookAccent get() = Color.parseColor("#FF9F0A")
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -308,7 +317,7 @@ class VoiceKeyboardView(context: Context) : View(context) {
         // motion without the loud case looking frantic.
         if (listening) {
             val level = amplitude.coerceIn(0f, 1f)
-            fill.color = accent
+            fill.color = micAccent
             for (i in 0 until 2) {
                 val spread = dp(14f) + dp(30f) * level
                 val wobble = (sin(phase + i * 2.1f) + 1f) / 2f
@@ -324,7 +333,7 @@ class VoiceKeyboardView(context: Context) : View(context) {
         canvas.drawCircle(micCx, micCy, micR, stroke)
 
         if (working) {
-            stroke.color = accent
+            stroke.color = micAccent
             stroke.strokeWidth = dp(2f)
             stroke.strokeCap = Paint.Cap.ROUND
             tmpRect.set(micCx - micR, micCy - micR, micCx + micR, micCy + micR)
@@ -335,7 +344,7 @@ class VoiceKeyboardView(context: Context) : View(context) {
 
         // Solid disc only while live — the one moment colour appears.
         if (listening) {
-            fill.color = accent
+            fill.color = micAccent
             fill.alpha = 255
             canvas.drawCircle(micCx, micCy, micR - dp(6f), fill)
         }
@@ -350,27 +359,10 @@ class VoiceKeyboardView(context: Context) : View(context) {
     }
 
     private fun drawMicGlyph(canvas: Canvas, cx: Float, cy: Float, tint: Int, scale: Float) {
-        val h = dp(19f) * scale
-        val w = dp(12f) * scale
-        micPath.reset()
-
-        // Capsule body.
-        tmpRect.set(cx - w / 2, cy - h / 2 - dp(2f), cx + w / 2, cy + h / 2 - dp(6f))
-        micPath.addRoundRect(tmpRect, w / 2, w / 2, Path.Direction.CW)
-
-        fill.color = tint
-        fill.alpha = 255
-        canvas.drawPath(micPath, fill)
-
-        // Cradle arc + stem.
-        stroke.color = tint
-        stroke.strokeWidth = dp(1.8f) * scale
-        stroke.strokeCap = Paint.Cap.ROUND
-        val cradle = w * 0.95f
-        tmpRect.set(cx - cradle, cy - dp(4f), cx + cradle, cy + dp(9f))
-        canvas.drawArc(tmpRect, 0f, 180f, false, stroke)
-        canvas.drawLine(cx, cy + dp(9f), cx, cy + dp(14f) * scale, stroke)
-        stroke.strokeCap = Paint.Cap.BUTT
+        // Shared with TextKeyboardView's small utility-row mic — see
+        // KeyboardIcons — so the two panels' mic glyphs are the same shape
+        // at different sizes, not two hand-tuned lookalikes.
+        KeyboardIcons.drawMic(canvas, cx, cy, dp(31f) * scale, tint, 255, fill, stroke, micPath, tmpRect)
     }
 
     private fun drawStatus(canvas: Canvas) {
@@ -425,10 +417,24 @@ class VoiceKeyboardView(context: Context) : View(context) {
         }
     }
 
-    /** Keyboard-switch, bold toggle, undo, backspace — four equal quarters. Low contrast on purpose. */
+    /**
+     * Keyboard-switch, bold toggle, undo, phrasebook, backspace, help,
+     * enter — seven equal sevenths. Low contrast on purpose except Enter.
+     *
+     * All seven share one [centerY]: vector icons ([KeyboardIcons] calls)
+     * take it directly since they treat their `cy` argument as a true
+     * geometric centre, while every text glyph computes its own baseline
+     * from `centerY - (metrics.ascent + metrics.descent) / 2` — the same
+     * technique [drawKey] already uses to centre key labels — instead of a
+     * hand-tuned per-glyph offset. Mixing baseline-positioned text with
+     * centre-positioned vectors under separate ad-hoc offsets (the previous
+     * version of this function) is exactly what drifted them out of
+     * alignment; this keeps every glyph's *optical* centre, not just its
+     * anchor point, on the same line regardless of its own font size.
+     */
     private fun drawUtilityGlyphs(canvas: Canvas) {
-        val y = height - dp(26f)
-        val fifth = width / 5f
+        val centerY = height - dp(22f)
+        val seventh = width / 7f
         stroke.color = muted
         stroke.strokeWidth = dp(1.6f)
         stroke.strokeCap = Paint.Cap.ROUND
@@ -439,7 +445,8 @@ class VoiceKeyboardView(context: Context) : View(context) {
         label.color = muted
         label.textSize = dp(12.5f)
         label.letterSpacing = 0f
-        canvas.drawText("ABC", fifth / 2f, y + dp(4f), label)
+        var m = label.fontMetrics
+        canvas.drawText("ABC", seventh / 2f, centerY - (m.ascent + m.descent) / 2, label)
 
         // B: tap toggles the selection between bold/un-bold (or, with
         // nothing selected, arms bold for whatever's typed/dictated next),
@@ -450,43 +457,53 @@ class VoiceKeyboardView(context: Context) : View(context) {
         // state a key colour could represent.
         label.color = muted
         label.typeface = boldTypeface
-        label.textSize = dp(14f)
-        canvas.drawText("B", fifth * 1.5f, y + dp(5f), label)
-        label.typeface = KeyboardPalette.typeface
-
-        // ☺: tap switches to the text keyboard's emoji page, long-press
-        // opens the phrasebook page instead (see onOpenEmojiPanel/onOpenPhrasebook).
-        label.color = muted
         label.textSize = dp(15f)
-        canvas.drawText("☺", fifth * 2.5f, y + dp(5f), label)
+        m = label.fontMetrics
+        canvas.drawText("B", seventh * 1.5f, centerY - (m.ascent + m.descent) / 2, label)
+        label.typeface = KeyboardPalette.typeface
 
         // Undo: always tappable, same muted styling as ABC/backspace — if
         // there's nothing eligible to undo the service just no-ops (see
         // VoiceImeService.undoLastDictation). Counter-clockwise arrow glyph
         // reads as "undo" without needing a text label the way ABC does.
         label.color = muted
-        label.textSize = dp(17f)
-        canvas.drawText("↺", fifth * 3.5f, y + dp(6f), label)
+        label.textSize = dp(21f)
+        m = label.fontMetrics
+        canvas.drawText("↺", seventh * 2.5f, centerY - (m.ascent + m.descent) / 2, label)
 
-        // Backspace: pentagon outline with an x.
-        val rx = fifth * 4.5f
-        micPath.reset()
-        micPath.moveTo(rx - dp(11f), y)
-        micPath.lineTo(rx - dp(4f), y - dp(7f))
-        micPath.lineTo(rx + dp(10f), y - dp(7f))
-        micPath.lineTo(rx + dp(10f), y + dp(7f))
-        micPath.lineTo(rx - dp(4f), y + dp(7f))
-        micPath.close()
-        canvas.drawPath(micPath, stroke)
-        canvas.drawLine(rx - dp(1f), y - dp(3f), rx + dp(5f), y + dp(3f), stroke)
-        canvas.drawLine(rx + dp(5f), y - dp(3f), rx - dp(1f), y + dp(3f), stroke)
+        // Emoji glyph: tap switches to the text keyboard's emoji page,
+        // long-press opens the phrasebook page instead (see
+        // onOpenEmojiPanel/onOpenPhrasebook). Same vector shape as
+        // TextKeyboardView's emoji-toggle key — see KeyboardIcons.
+        KeyboardIcons.drawEmoji(canvas, seventh * 3.5f, centerY, dp(21f), bookAccent, 255, stroke, fill, tmpRect)
+        // drawEmoji resets strokeCap to BUTT internally; the backspace
+        // glyph below needs it back to ROUND, same as the rest of this row.
+        stroke.strokeCap = Paint.Cap.ROUND
 
+        // Backspace: same muted arrow-plus-cross shape as TextKeyboardView's
+        // — see KeyboardIcons.drawBackspace — so both panels' backspace
+        // glyphs are the identical shape, not two hand-drawn lookalikes.
+        KeyboardIcons.drawBackspace(canvas, seventh * 4.5f, centerY, dp(22f), muted, 255, stroke, micPath)
+        stroke.strokeCap = Paint.Cap.BUTT
+
+        // Help: opens the how-to-use guide (GuideActivity). Plain tap only.
+        label.color = muted
+        label.textSize = dp(16f)
+        m = label.fontMetrics
+        canvas.drawText("?", seventh * 5.5f, centerY - (m.ascent + m.descent) / 2, label)
+
+        // Enter: same action as TextKeyboardView's Enter key
+        // (VoiceImeService.performEnterAction), same green — the one
+        // non-muted glyph in this row, matching how Enter is the one
+        // accent-coloured key on the text keyboard's own bottom row.
+        KeyboardIcons.drawArrow(canvas, seventh * 6.5f, centerY, dp(22f), enterAccent, 255, stroke, micPath, 0f)
         stroke.strokeCap = Paint.Cap.BUTT
     }
 
     /**
      * Privacy glyph, top-centre — tapping it (only from [State.IDLE], same
-     * as the other toggles) shows the actual runtime evidence behind the
+     * as the other toggles) opens full Settings ([onOpenSettings]).
+     * Long-pressing it instead shows the actual runtime evidence behind the
      * "fully offline" claim: the permissions this app has genuinely
      * declared, read live from [android.content.pm.PackageManager] rather
      * than restating a claim from a settings screen. The manifest strips
@@ -494,43 +511,15 @@ class VoiceKeyboardView(context: Context) : View(context) {
      * `tools:node="remove"` (see `checkDebugNoInternet` in
      * app/build.gradle.kts), so if this ever showed a network permission
      * present, that would mean the build genuinely regressed — not just a
-     * copy change away from being true.
-     *
-     * Long-pressing it instead opens full Settings ([onOpenSettings]) — the
-     * voice panel otherwise has no path to Settings at all, unlike the text
-     * keyboard's long-press-?123.
+     * copy change away from being true. Same tap/long-press mapping as
+     * TextKeyboardView's lock key, exactly.
      */
     private fun drawPrivacyGlyph(canvas: Canvas) {
-        label.color = muted
-        label.textSize = dp(13f)
-        label.letterSpacing = 0f
-        canvas.drawText("🔒", width / 2f, dp(29f), label)
+        KeyboardIcons.drawLock(canvas, width / 2f, dp(21f), dp(20f), muted, 255, fill, stroke, tmpRect)
     }
 
     private fun inPrivacyGlyph(x: Float, y: Float) =
         x >= width / 2f - dp(20f) && x <= width / 2f + dp(20f) && y <= dp(44f)
-
-    private fun privacyProofText(): String {
-        val pm = context.packageManager
-        val info = pm.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
-        val declared = info.requestedPermissions?.toList().orEmpty()
-        val networkPerms = listOf(
-            android.Manifest.permission.INTERNET,
-            android.Manifest.permission.ACCESS_NETWORK_STATE,
-            android.Manifest.permission.ACCESS_WIFI_STATE,
-        )
-        val hasNetwork = declared.any { it in networkPerms }
-        val names = declared.map { it.substringAfterLast('.') }
-        return buildString {
-            if (hasNetwork) {
-                append(context.getString(R.string.privacy_proof_warning))
-            } else {
-                append(context.getString(R.string.privacy_proof_ok))
-            }
-            append(" ")
-            append(context.getString(R.string.privacy_proof_permissions, names.joinToString(", ").ifEmpty { "none" }))
-        }
-    }
 
     /**
      * Script-output toggle (top-right, "A" / "अ") — switches whether
@@ -548,7 +537,11 @@ class VoiceKeyboardView(context: Context) : View(context) {
     private fun drawScriptToggle(canvas: Canvas) {
         if (!isHindiForced()) return
         val devanagari = KeyboardSettings.devanagariMode(context)
-        label.color = if (devanagari) fg else muted
+        // Same static muted colour as every other utility glyph on this
+        // panel (mic, emoji, lock, ABC, undo, backspace, help) — a
+        // brighter "active" colour here read as a different shade next to
+        // the rest of the row rather than a meaningful state indicator.
+        label.color = muted
         label.textSize = dp(15f)
         label.letterSpacing = 0f
         canvas.drawText(if (devanagari) "अ" else "A", width - dp(28f), dp(29f), label)
@@ -571,9 +564,10 @@ class VoiceKeyboardView(context: Context) : View(context) {
             KeyboardSettings.LanguageHint.ENGLISH -> "EN"
             KeyboardSettings.LanguageHint.HINDI -> "HI"
         }
-        val active = KeyboardSettings.languageHint(context) != KeyboardSettings.LanguageHint.AUTO
         label.textAlign = Paint.Align.LEFT
-        label.color = if (active) fg else muted
+        // Same static muted colour as every other utility glyph — see
+        // drawScriptToggle for why this no longer brightens when active.
+        label.color = muted
         label.textSize = dp(13f)
         label.letterSpacing = 0f
         canvas.drawText(hintLabel, dp(16f), dp(29f), label)
@@ -632,17 +626,17 @@ class VoiceKeyboardView(context: Context) : View(context) {
                     return true
                 }
                 if (inUtilityRow(y)) {
-                    val fifth = width / 5f
-                    if (x < fifth) {
+                    val seventh = width / 7f
+                    if (x < seventh) {
                         // ABC fires on release — plain tap, nothing to arm on DOWN.
-                    } else if (x < 2f * fifth) {
+                    } else if (x < 2f * seventh) {
                         // B fires on release (single- or double-tap) — nothing to arm on DOWN.
-                    } else if (x < 3f * fifth) {
+                    } else if (x < 3f * seventh) {
+                        // Undo fires on release, same as ABC/B — nothing to do on DOWN.
+                    } else if (x < 4f * seventh) {
                         emojiLongPressed = false
                         armEmojiLongPress()
-                    } else if (x < 4f * fifth) {
-                        // Undo fires on release, same as ABC/B — nothing to do on DOWN.
-                    } else {
+                    } else if (x < 5f * seventh) {
                         if (state == State.LISTENING) {
                             // Mid-recording, backspace reads as "cancel"
                             // rather than "delete a character" — deleting
@@ -704,28 +698,29 @@ class VoiceKeyboardView(context: Context) : View(context) {
                 if (state == State.IDLE && inPrivacyGlyph(downX, downY)) {
                     cancelPrivacyLongPress()
                     if (privacyLongPressed) {
-                        // The long-press runnable already fired
-                        // onOpenSettings — this release shouldn't also
-                        // show the info panel underneath it.
+                        // The long-press runnable already fired showInfo —
+                        // this release shouldn't also open Settings
+                        // underneath it.
                         privacyLongPressed = false
                     } else if (inPrivacyGlyph(x, y)) {
                         if (KeyboardSettings.hapticEnabled(context)) {
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                         }
-                        showInfo(privacyProofText())
+                        onOpenSettings?.invoke()
                     }
                     return true
                 }
                 if (inUtilityRow(y) && inUtilityRow(downY)) {
                     // Backspace already fired on DOWN (see above) — only
-                    // "ABC", "B", "☺" and "undo" are tap-on-release here.
-                    val fifth = width / 5f
-                    if (x < fifth) {
+                    // "ABC", "B", "☺", "undo", "?", and Enter are
+                    // tap-on-release here.
+                    val seventh = width / 7f
+                    if (x < seventh) {
                         onSwitchToText?.invoke()
                         if (KeyboardSettings.hapticEnabled(context)) {
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                         }
-                    } else if (x < 2f * fifth) {
+                    } else if (x < 2f * seventh) {
                         // B: every tap toggles bold immediately (no delay —
                         // see TextKeyboardView.onBoldTapped for why a delay
                         // here would make bold feel broken on ordinary
@@ -747,7 +742,12 @@ class VoiceKeyboardView(context: Context) : View(context) {
                         if (KeyboardSettings.hapticEnabled(context)) {
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                         }
-                    } else if (x < 3f * fifth) {
+                    } else if (x < 3f * seventh) {
+                        onUndoLastDictation?.invoke()
+                        if (KeyboardSettings.hapticEnabled(context)) {
+                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        }
+                    } else if (x < 4f * seventh) {
                         cancelEmojiLongPress()
                         if (emojiLongPressed) {
                             // The long-press runnable already fired
@@ -760,8 +760,16 @@ class VoiceKeyboardView(context: Context) : View(context) {
                                 performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                             }
                         }
-                    } else if (x < 4f * fifth) {
-                        onUndoLastDictation?.invoke()
+                    } else if (x < 5f * seventh) {
+                        // Backspace already fired on DOWN — nothing to do
+                        // here for that column.
+                    } else if (x < 6f * seventh) {
+                        onOpenGuide?.invoke()
+                        if (KeyboardSettings.hapticEnabled(context)) {
+                            performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        }
+                    } else {
+                        onEnter?.invoke()
                         if (KeyboardSettings.hapticEnabled(context)) {
                             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                         }
@@ -791,7 +799,7 @@ class VoiceKeyboardView(context: Context) : View(context) {
             if (KeyboardSettings.hapticEnabled(context)) {
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
             }
-            onOpenSettings?.invoke()
+            showInfo(KeyboardSettings.privacyProofText(context))
         }
         privacyLongPressRunnable = r
         handler.postDelayed(r, LONG_PRESS_MS)

@@ -88,6 +88,13 @@
             android:label="@string/phrasebook_title"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Reached from SetupActivity and from VoiceImeService (the voice
+             panel's help button) — both same-app, so not exported. -->
+        <activity
+            android:name=".GuideActivity"
+            android:exported="false"
+            android:label="@string/guide_title" />
+
     </application>
 
 </manifest>

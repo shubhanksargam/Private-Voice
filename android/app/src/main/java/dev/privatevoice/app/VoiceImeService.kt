@@ -5,6 +5,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
@@ -34,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.sin
 
 /**
  * The keyboard: a real QWERTY typing surface with a mic key that opens a
@@ -55,10 +60,311 @@ class VoiceImeService : InputMethodService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val recorder = AudioRecorder()
 
+    /**
+     * The sound design: a deep, layered "swell" — the miniature version
+     * of a cinematic braam (Inception's horn hit is the reference point)
+     * rather than a bright synth chirp. What actually gives that family
+     * of sound its weight, reproduced here at UI-cue scale:
+     *   - Several detuned sine layers stacked on the same fundamental —
+     *     pure unison sine layers don't do this; the slight detuning is
+     *     what creates the beating, "thick ensemble" texture instead of a
+     *     single clean tone.
+     *   - An eased-in (squared, not linear) attack — a real crescendo
+     *     over ~35-45ms rather than an instant onset, which is what reads
+     *     as "building" instead of "poking."
+     *   - A quiet high overtone on top for a touch of shimmer, the way a
+     *     string/brass overtone sits above a low cinematic hit.
+     * Start ([playStartChime], static) is the "here we go" cue; accept
+     * ([playAcceptChime]) rises from that exact same pitch up a full
+     * fifth — a wide, uplifting leap rather than the falling-minor-third
+     * "landing" motif the first version used, which read as moody rather
+     * than the "inspiring" confirmation this was asking for. Enter
+     * ([playEnterChime]) and key taps ([playKeyTick]) use this same
+     * family too, just at their own pitch/duration/volume.
+     *
+     * The fundamentals sit an octave higher than the first version of
+     * this (which used G2/Eb2-C2, ~65-98Hz) — that version was silent on
+     * the test device, and the reason is physical, not a code bug: phone
+     * speakers are tiny drivers that roll off hard below ~150-200Hz, so
+     * true sub-100Hz "cinematic bass" simply cannot reproduce on this
+     * hardware at any volume. A3-ish (~131-220Hz) keeps the same warm,
+     * low-relative-to-a-UI-beep character while staying inside a range
+     * small speakers can actually move air at.
+     *
+     * Synthesized in-process rather than [ToneGenerator]: that API only
+     * offers flat DTMF/telephony-style tones (fixed pitch, hard onset, no
+     * layering) — confirmed on-device to sound like a harsh phone beep,
+     * nothing like this. Media volume (via [AudioAttributes], not a raw
+     * stream index) after confirming via logcat that
+     * [AudioManager.STREAM_NOTIFICATION] was silently muted on the test
+     * device (0/15) despite the call succeeding — media is the stream a
+     * user actively dictating is actually likely to have up.
+     */
+    // Each chime's waveform is fixed content — the exact same numbers
+    // every time a given one plays — so it's computed once, lazily, on
+    // first use and reused from then on, rather than re-running ~30-50k
+    // sin() calls synthesizing an identical array from scratch on every
+    // single tap/Enter press. The synthesis cost was never high enough to
+    // cause visible jank on its own, but recomputing unchanging content
+    // repeatedly is wasted work regardless of how cheap each instance is.
+    private val startChimePcm by lazy { cinematicSwellPcm(SAMPLE_RATE, fundamental = 220.0, durationMs = 190) }
+
+    /**
+     * A quiet layered tone, rising in pitch across its own fade — chasing
+     * a moving target across several rounds of feedback: "like a swoosh
+     * of the wind" → "a bit of Zimmer type guitar" (tried, too loud/
+     * disconnected, scrapped) → "like a genie appearing" (added a bright
+     * plucked-arpeggio sparkle) → "remove the swoosh" (dropped the
+     * filtered-noise wind layer this started as) → "remove the sparkle"
+     * (dropped the arpeggio too, leaving just the tone; see
+     * [genieAppearPcm]). 2.5s — long enough for the exponential fade to
+     * read as fading out rather than just stopping. [playAcceptChime]
+     * passes a matching longer `releaseAfterMs` to [playPcm]; the default
+     * 400ms there is tuned for the short chimes and would release (and
+     * therefore cut off) the AudioTrack well before this one finishes.
+     */
+    private val acceptChimePcm by lazy { genieAppearPcm(SAMPLE_RATE, durationMs = 2500) }
+
+    /**
+     * Same layered/detuned/swell family as every other cue here, for when
+     * transcription genuinely fails (see [finishRecording]'s `outcome ==
+     * null` branch — not the same as an empty/silent recording, which
+     * gets no sound at all rather than being treated as an error). A3
+     * falling to E3, the accept chime's rising fourth inverted, so the
+     * pair reads as opposite outcomes of the same gesture rather than two
+     * unrelated tones — "that didn't land" instead of "confirmed."
+     */
+    private val failureChimePcm by lazy { cinematicSwellPcm(SAMPLE_RATE, fundamental = 220.0, glideTo = 164.8, durationMs = 220, amplitude = 0.24) }
+
+    /**
+     * Same family as the mic's start chime, for Enter — see
+     * [performEnterAction], the single function both panels' Enter keys
+     * already route through, so one call site covers both. A rising
+     * fourth (C3 → F3) reads as "sent/confirmed," distinct enough from
+     * the mic's static start tone and the key tick that all three stay
+     * tellable apart by ear, not three instances of the same swell.
+     * Shorter than the mic's start chime (Enter is the more frequent of
+     * the two actions) and slightly quieter, since it fires on every
+     * line/message rather than once per dictation.
+     */
+    private val enterChimePcm by lazy {
+        cinematicSwellPcm(SAMPLE_RATE, fundamental = 130.8, glideTo = 174.6, durationMs = 150, amplitude = 0.28)
+    }
+
+    /**
+     * The same low, layered/detuned family as the mic and Enter cues, not
+     * a bright pitch of its own — the first version of this used 380Hz
+     * (a full octave-plus above everything else) specifically to stand
+     * apart, but that broke the "one consistent sound identity" the mic
+     * and Enter chimes establish; a keyboard's tap sound should read as
+     * the same instrument playing quieter, not a different instrument.
+     * Scaled down from the mic/Enter cues only in what a per-keystroke
+     * sound actually needs to change: much shorter (30ms vs. 150-230ms,
+     * so it can't overlap itself on fast typing) and quieter (0.14 vs.
+     * 0.28-0.34, so dozens of these in a row stay subtle, not fatiguing).
+     * See [handleTextKey] for which key actions trigger it (typing keys
+     * only; Enter keeps its own distinct chime, navigation-style keys
+     * like the mic/lock/emoji stay silent here since they're not "typing").
+     */
+    private val keyTickPcm by lazy {
+        cinematicSwellPcm(SAMPLE_RATE, fundamental = 174.6, durationMs = 30, amplitude = 0.14, attackMs = 4.0, releaseMs = 10.0)
+    }
+
+    private fun playStartChime() = playPcm(startChimePcm)
+    private fun playAcceptChime() = playPcm(acceptChimePcm, releaseAfterMs = 2700)
+    private fun playEnterChime() = playPcm(enterChimePcm)
+    private fun playKeyTick() = playPcm(keyTickPcm, releaseAfterMs = 150)
+    private fun playFailureChime() = playPcm(failureChimePcm)
+
+    /**
+     * Builds and starts playback entirely on a background thread — the
+     * lazy `by lazy` properties above mean this only pays the AudioTrack
+     * construction/write/play cost per call (synthesis itself happens once,
+     * the first time each property is touched), but there's no reason for
+     * even that to run on the thread handling the tap that triggered it.
+     * A no-op when [KeyboardSettings.soundEnabled] is off — one switch for
+     * every sound effect this app makes, same as haptics has one switch
+     * for every vibration, checked here rather than at each call site.
+     */
+    private fun playPcm(pcm: ShortArray, releaseAfterMs: Long = 400) {
+        if (!KeyboardSettings.soundEnabled(this)) return
+        scope.launch(Dispatchers.Default) {
+            runCatching {
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(SAMPLE_RATE)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build(),
+                    )
+                    .setBufferSizeInBytes(pcm.size * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build()
+                track.write(pcm, 0, pcm.size)
+                track.play()
+                // One-shot: release once playback has had time to finish
+                // rather than leaning on a marker callback, which is simple
+                // and reliable across OEM audio stacks for a clip this short.
+                delay(releaseAfterMs)
+                runCatching { track.release() }
+            }
+        }
+    }
+
+    /**
+     * A stack of slightly detuned sine layers on [fundamental] (optionally
+     * gliding to [glideTo]), plus a sub-octave layer for weight and a
+     * quiet high overtone for shimmer, under an eased-in swell envelope —
+     * see [playStartChime]/[playAcceptChime] for why each of those pieces
+     * is what gives this its "cinematic hit," not "UI beep," character.
+     * Phase is accumulated per-sample from the *instantaneous* frequency
+     * of each layer rather than computed directly from `sin(2·π·f·t)` —
+     * necessary whenever frequency changes over time (the glide), since
+     * the latter produces an audible discontinuity instead of a smooth
+     * pitch bend.
+     */
+    private fun cinematicSwellPcm(
+        sampleRate: Int,
+        fundamental: Double,
+        durationMs: Int,
+        glideTo: Double = fundamental,
+        amplitude: Double = 0.34,
+        attackMs: Double = 40.0,
+        releaseMs: Double = 70.0,
+    ): ShortArray {
+        val n = sampleRate * durationMs / 1000
+        val attack = (sampleRate * attackMs / 1000).toInt().coerceAtLeast(1)
+        val release = (sampleRate * releaseMs / 1000).toInt().coerceAtLeast(1)
+        val pcm = ShortArray(n)
+
+        // Ratio-relative-to-fundamental, amplitude-relative-to-each-other.
+        // 1.0/0.994/1.006 are the detuned unison trio (the "thick ensemble"
+        // beating, and the layer doing most of the audible work); 0.5 is a
+        // sub-octave layer for a bit of extra weight on decent speakers —
+        // kept quiet on purpose, since at these fundamentals it's still
+        // marginal for a phone driver and shouldn't eat amplitude budget
+        // the audible layers need; the last entry is a quiet high overtone
+        // for shimmer on top.
+        val layerRatios = doubleArrayOf(1.0, 0.994, 1.006, 0.5, 4.0)
+        val layerAmps = doubleArrayOf(0.48, 0.32, 0.32, 0.14, 0.14)
+        val norm = layerAmps.sum()
+        val phases = DoubleArray(layerRatios.size)
+
+        for (i in 0 until n) {
+            val progress = i.toDouble() / n
+            val freq = fundamental + (glideTo - fundamental) * progress
+            var sample = 0.0
+            for (l in layerRatios.indices) {
+                phases[l] += 2.0 * Math.PI * (freq * layerRatios[l]) / sampleRate
+                sample += sin(phases[l]) * layerAmps[l]
+            }
+            sample /= norm
+
+            val envelope = when {
+                // Squared, not linear — an eased crescendo reads as
+                // "building" the way a real swell does; a linear ramp this
+                // short still reads as an abrupt onset.
+                i < attack -> (i.toDouble() / attack).let { it * it }
+                i > n - release -> (n - i).toDouble() / release
+                else -> 1.0
+            }
+            pcm[i] = (amplitude * envelope * Short.MAX_VALUE * sample).toInt().toShort()
+        }
+        return pcm
+    }
+
+    /**
+     * The layered "Hans Zimmer" tone (see [cinematicSwellPcm]'s KDoc for
+     * the detuned-unison-trio + sub-octave technique — same idea, inlined
+     * here so the rising pitch during the fade can hold flat through the
+     * attack first), rising in pitch across its own fade — a "genie
+     * appearing" arrival on its own now. Both the filtered-noise wind/
+     * whoosh layer this started as (per "swoosh of the wind") and the
+     * bright plucked-arpeggio sparkle that replaced it (per "like a genie
+     * appearing") were tried, iterated on, and dropped per direct
+     * feedback ("remove the swoosh," then "remove the sparkle") — the
+     * tone alone turned out to be what should carry this.
+     */
+    private fun genieAppearPcm(
+        sampleRate: Int,
+        durationMs: Int,
+        amplitude: Double = 0.1,
+        toneFundamental: Double = 220.0,
+        toneGlideTo: Double = 440.0,
+        attackMs: Double = 130.0,
+    ): ShortArray {
+        val n = sampleRate * durationMs / 1000
+        // Fixed attack in ms, not a percentage of the total — the arrival
+        // should stay a quick, snappy transient regardless of how long
+        // the fade afterward runs; scaling it with duration would stretch
+        // the onset itself into something slow and mushy at 2.5s.
+        val attack = (sampleRate * attackMs / 1000).toInt().coerceIn(1, n - 1)
+        val release = (n - attack).coerceAtLeast(1)
+        val pcm = ShortArray(n)
+
+        val layerRatios = doubleArrayOf(1.0, 0.994, 1.006, 0.5)
+        val layerAmps = doubleArrayOf(0.4, 0.3, 0.3, 0.3)
+        val toneNorm = layerAmps.sum()
+        val tonePhases = DoubleArray(layerRatios.size)
+
+        for (i in 0 until n) {
+            val envelope = when {
+                i < attack -> (i.toDouble() / attack).let { it * it }
+                // Exponential, not linear — a straight ramp down reads as
+                // artificially even/mechanical; a real fade decays
+                // gradually and lingers softly at the very end, which is
+                // what an exponential curve actually produces. -1.6
+                // spreads that decay across the full 2.5s properly — a
+                // steeper curve drops to near-silence early and leaves
+                // several hundred ms of dead air after, which reads as
+                // "a burst" rather than "a fade." exp(-1.6x) still lands
+                // around 20% remaining at the tail — soft, not abrupt —
+                // rather than fully silent before the clip's actual end.
+                else -> Math.exp(-1.6 * (i - attack).toDouble() / release)
+            }
+
+            // Held flat through the attack (a grounded pitch for the
+            // initial "arrival"), then rises across the release/fade —
+            // not the whole duration — so the ascent is concentrated
+            // exactly where the fade happens instead of spread thin
+            // across the loud opening too, where it wasn't landing as
+            // "pitch rising while it fades away."
+            val riseProgress = if (i < attack) 0.0 else ((i - attack).toDouble() / release).coerceIn(0.0, 1.0)
+            val toneFreq = toneFundamental + (toneGlideTo - toneFundamental) * riseProgress
+            var tone = 0.0
+            for (l in layerRatios.indices) {
+                tonePhases[l] += 2.0 * Math.PI * (toneFreq * layerRatios[l]) / sampleRate
+                tone += sin(tonePhases[l]) * layerAmps[l]
+            }
+            tone /= toneNorm
+
+            pcm[i] = (amplitude * envelope * Short.MAX_VALUE * tone).toInt().toShort()
+        }
+        return pcm
+    }
+
     private var textView: TextKeyboardView? = null
     private var voiceView: VoiceKeyboardView? = null
-    private var mode = Mode.TEXT
+    private var mode = Mode.VOICE
     private var busy = false
+
+    /**
+     * The mode to return to when the user exits the emoji or phrasebook
+     * page — [TextKeyboardView] itself has no concept of "voice mode," so
+     * this is what lets [TextKeyboardView.onExitOverlayPage] send them back
+     * to the voice panel instead of stranding them on letters, when that's
+     * where the detour started. Null means "no detour in progress" (the
+     * page was opened directly from the text keyboard, or nothing is open
+     * at all) — in that case exiting an overlay page does nothing extra.
+     */
+    private var modeBeforeDetour: Mode? = null
 
     /** True while the in-flight recording is for [PhrasebookStore], not the target field. */
     private var recordingForPhrase = false
@@ -74,9 +380,15 @@ class VoiceImeService : InputMethodService() {
 
         tv.onKey = { handleTextKey(it) }
         tv.onLongPressSpace = { showSystemImePicker() }
-        tv.onLongPressSettings = { openSettingsScreen() }
+        tv.onLongPressPrivacyInfo = {
+            Toast.makeText(this, KeyboardSettings.privacyProofText(this), Toast.LENGTH_LONG).show()
+        }
         tv.onToggleBold = { boldSelectionIfAny() }
         tv.onDoubleTapBoldSave = { saveSelectionToPhrasebook() }
+        tv.onExitOverlayPage = {
+            if (modeBeforeDetour == Mode.VOICE) switchToVoiceMode()
+            modeBeforeDetour = null
+        }
         tv.setPhrases(PhrasebookStore.list(this))
 
         vv.onHoldStart = { beginRecording() }
@@ -85,15 +397,19 @@ class VoiceImeService : InputMethodService() {
         vv.onCancelRecording = { cancelRecording() }
         vv.onSwitchToText = { switchToTextMode() }
         vv.onOpenPhrasebook = {
+            modeBeforeDetour = Mode.VOICE
             switchToTextMode()
             textView?.setPhrases(PhrasebookStore.list(this))
             textView?.showPhrasebookPage()
         }
         vv.onOpenEmojiPanel = {
+            modeBeforeDetour = Mode.VOICE
             switchToTextMode()
             textView?.showEmojiPage()
         }
         vv.onOpenSettings = { openSettingsScreen() }
+        vv.onOpenGuide = { openGuideScreen() }
+        vv.onEnter = { performEnterAction() }
         vv.onToggleBold = {
             textView?.toggleBold()
             boldSelectionIfAny()
@@ -108,7 +424,10 @@ class VoiceImeService : InputMethodService() {
             if (!undone) voiceView?.showTransientBlocked(getString(R.string.nothing_to_undo))
             undone
         }
-        vv.visibility = View.GONE
+        // Voice is the default landing surface (see onStartInputView) —
+        // start the text panel hidden so the very first frame doesn't
+        // flash letters before switching.
+        tv.visibility = View.GONE
 
         // Warm the model on a background thread as soon as the keyboard is
         // built, so the first press doesn't pay a multi-hundred-ms load.
@@ -151,12 +470,14 @@ class VoiceImeService : InputMethodService() {
         lastFieldKey = fieldKey
 
         if (!sameField) {
-            // Only for a genuinely different field — voice is opted into
-            // per-field, not remembered across them. Returning to the same
-            // field (e.g. after visiting Settings or the Phrasebook screen)
-            // should reveal the keyboard exactly as it was left, not reset it.
-            switchToTextMode()
+            // Only for a genuinely different field — the starting mode is
+            // reset per-field, not remembered across them. Returning to the
+            // same field (e.g. after visiting Settings or the Phrasebook
+            // screen) should reveal the keyboard exactly as it was left, not
+            // reset it. Voice is the default landing surface, not text.
+            switchToVoiceMode()
             textView?.resetToLetters()
+            modeBeforeDetour = null
             lastVoiceCommitLength = 0
             // A quick HI override for one message on the voice panel
             // shouldn't silently keep applying to everything typed after —
@@ -196,6 +517,18 @@ class VoiceImeService : InputMethodService() {
         if (action !is TextKeyboardView.KeyAction.Mic && action != TextKeyboardView.KeyAction.RecordPhrase) {
             lastVoiceCommitLength = 0
         }
+        // The light tick, not Enter's own distinct chime and not played for
+        // navigation-style keys (mic, lock, phrasebook management) that
+        // aren't really "typing."
+        when (action) {
+            is TextKeyboardView.KeyAction.Letter,
+            is TextKeyboardView.KeyAction.Symbol,
+            is TextKeyboardView.KeyAction.Space,
+            is TextKeyboardView.KeyAction.SpacePeriod,
+            is TextKeyboardView.KeyAction.Backspace,
+            -> playKeyTick()
+            else -> Unit
+        }
         when (action) {
             is TextKeyboardView.KeyAction.Letter -> ic?.commitText(styledText(action.char.toString()), 1)
             is TextKeyboardView.KeyAction.Symbol -> ic?.commitText(styledText(action.char.toString()), 1)
@@ -227,6 +560,10 @@ class VoiceImeService : InputMethodService() {
                     Intent(this, PhrasebookActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
             }
+            // A plain tap on the lock opens Settings; long-pressing it shows
+            // the privacy info readout instead (tv.onLongPressPrivacyInfo,
+            // wired above) — same mapping as the voice panel's lock glyph.
+            is TextKeyboardView.KeyAction.PrivacyInfo -> openSettingsScreen()
             // Shift and the letters/symbols/emoji/bold toggles are fully
             // handled inside TextKeyboardView — they never reach onKey.
             // Bold's *state* (boldActive) is still read directly, just not
@@ -263,6 +600,7 @@ class VoiceImeService : InputMethodService() {
     }
 
     private fun performEnterAction() {
+        playEnterChime()
         val info = currentInputEditorInfo
         val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
         val multiline = (info?.inputType ?: 0) and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
@@ -559,6 +897,7 @@ class VoiceImeService : InputMethodService() {
         }
         try {
             recorder.start()
+            playStartChime()
             // Surfaced now (rather than only silently changing behaviour at
             // commit time) so it's obvious *before* speaking that this
             // dictation is going to replace the selected text, not insert
@@ -655,7 +994,23 @@ class VoiceImeService : InputMethodService() {
 
     private fun finishRecording() {
         if (!recorder.isRecording) return
-        val samples = recorder.stop()
+        val rawSamples = recorder.stop()
+
+        // The start chime (playStartChime, in beginRecording) plays out of
+        // the speaker at almost the exact moment recording begins, and
+        // enough of it leaks back into the mic on real hardware that
+        // Whisper can hallucinate a word from it on an otherwise-silent
+        // recording (reported: silence transcribed as "bell"). Rather than
+        // try to time-align playback and capture exactly, just trim the
+        // leading window that could plausibly still contain it —
+        // CHIME_TRIM_MS covers the chime's own ~190ms plus margin for
+        // AudioTrack start-up latency and any capture/playback scheduling
+        // skew between the two. Trimming happens before the stray-tap
+        // check below, so a genuinely empty recording still reads as empty
+        // rather than "too short to tell" once the contaminated window is
+        // removed.
+        val trimSamples = (AudioRecorder.SAMPLE_RATE * CHIME_TRIM_MS / 1000).coerceAtMost(rawSamples.size)
+        val samples = if (trimSamples > 0) rawSamples.copyOfRange(trimSamples, rawSamples.size) else rawSamples
 
         // Ignore taps and stray presses rather than sending a fraction of a
         // second of noise to the model and committing whatever it invents.
@@ -663,6 +1018,8 @@ class VoiceImeService : InputMethodService() {
             voiceView?.showIdle()
             return
         }
+
+        playAcceptChime()
 
         busy = true
         // Checked once up front rather than only where `small` would've
@@ -872,7 +1229,10 @@ class VoiceImeService : InputMethodService() {
                 return@launch
             }
             when {
-                outcome == null -> voiceView?.showTransientBlocked(getString(R.string.transcription_failed))
+                outcome == null -> {
+                    playFailureChime()
+                    voiceView?.showTransientBlocked(getString(R.string.transcription_failed))
+                }
                 outcome.text.isBlank() -> voiceView?.showIdle()
                 else -> {
                     commitTranscript(outcome.text, outcome.lowConfidenceWords)
@@ -1195,6 +1555,13 @@ class VoiceImeService : InputMethodService() {
         )
     }
 
+    private fun openGuideScreen() {
+        startActivity(
+            Intent(this, GuideActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         if (recorder.isRecording) recorder.cancel()
@@ -1215,7 +1582,18 @@ class VoiceImeService : InputMethodService() {
         /** ~0.3s at 16kHz. Below this it's a stray tap, not speech. */
         const val MIN_SAMPLES = 4_800
 
+        /**
+         * Leading window trimmed from every recording before it reaches
+         * the model — long enough to cover the start chime's own ~190ms
+         * plus margin for playback/capture timing skew. See
+         * [finishRecording] for the mic-bleed problem this fixes.
+         */
+        const val CHIME_TRIM_MS = 300
+
         const val AMPLITUDE_POLL_MS = 40L
+
+        /** Sample rate for the synthesized start/accept sweep tones — see [playStartChime]/[playAcceptChime]. */
+        const val SAMPLE_RATE = 44100
 
         /**
          * Hindi-probability floor for treating AUTO-mode audio as

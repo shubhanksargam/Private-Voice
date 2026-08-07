@@ -40,6 +40,7 @@
     <!-- Keyboard settings — reached via long-press ?123/ABC, or from here. -->
     <string name="settings_section">Keyboard settings</string>
     <string name="setting_haptics">Key vibration</string>
+    <string name="setting_sound">Key sound</string>
     <string name="setting_theme">Theme</string>
     <string name="setting_language">Default language</string>
     <string name="language_auto">Auto</string>
@@ -54,6 +55,11 @@
     <string name="theme_black">Black</string>
     <string name="on">On</string>
     <string name="off">Off</string>
+
+    <!-- Guide / how-to-use screen -->
+    <string name="guide_title">How to use Private Voice</string>
+    <string name="guide_tagline">Directions, gestures, and a few tips that aren\'t obvious from tapping around.</string>
+    <string name="action_open_guide">How to use →</string>
 
     <!-- Phrasebook management screen -->
     <string name="phrasebook_title">Phrasebook</string>
