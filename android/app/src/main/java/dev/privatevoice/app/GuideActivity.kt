@@ -180,6 +180,8 @@ class GuideActivity : AppCompatActivity() {
                     "permissions live, any time you want to check.",
             )
         }
+
+        root.addView(footer())
     }
 
     // --- tiny view helpers, same restrained style as SetupActivity ---
@@ -247,6 +249,15 @@ class GuideActivity : AppCompatActivity() {
         v.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         v.setOnClickListener { finish() }
         return v
+    }
+
+    private fun footer(): View = TextView(this).apply {
+        text = "© 2026 Shubhank Sargam"
+        textSize = 12f
+        gravity = android.view.Gravity.CENTER
+        setTextColor(mutedColor)
+        setPadding(0, dp(40), 0, 0)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

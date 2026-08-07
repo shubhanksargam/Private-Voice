@@ -10,11 +10,11 @@ repo before acting on it — this is a snapshot, not a live status.
 - [ ] **README is now current** (rewritten 2026-08-06) — was describing an
   unbuilt M0-only state; the keyboard has been built and in daily use for
   several sessions since. Re-check it's still accurate before pushing.
-- [x] **Licence chosen and added (2026-08-08)**: MIT, matching the
-  dependency stack (Whisper MIT, whisper.cpp MIT, sherpa-onnx Apache-2.0,
-  `opus-mt-en-hi` Apache-2.0). `LICENSE` file added at repo root and pushed
-  to `origin/main`; `README.md`'s Licences section updated to point at it
-  instead of calling this an open decision.
+- [x] **Licence chosen and added (2026-08-08)**: all rights reserved, not
+  MIT — the developer decided against a permissive licence despite matching
+  the dependency stack. `LICENSE` file at repo root states the source is
+  public for viewing only, with no licence granted to use, copy, modify, or
+  redistribute it. `README.md`'s Licences section updated to match.
 - [x] **`.gitignore` gap closed (2026-08-06)**: `models_mt/` (the EN→HI
   MarianMT ONNX weights, ~167MB across 4 files) was untracked but *not*
   gitignored — one `git add -A` away from bloating the repo with binaries

@@ -102,4 +102,7 @@ Full toolchain recipe (AGP 9 / built-in Kotlin / `JAVA_HOME` gotchas): `docs/SET
 Whisper is MIT. whisper.cpp is MIT. sherpa-onnx is Apache-2.0 (legacy path, not the
 shipping backend). `opus-mt-en-hi` (Helsinki-NLP) is Apache-2.0. IndicConformer is
 MIT (evaluated, not used). Verify the licence of any fine-tune before shipping it.
-This project's own code is MIT-licensed — see [`LICENSE`](LICENSE).
+This project's own code is all rights reserved — public for viewing on GitHub, but
+no licence is granted to use, copy, modify, or redistribute it. See [`LICENSE`](LICENSE).
+
+© 2026 Shubhank Sargam.
